@@ -394,7 +394,6 @@ const EditBidForm = ({ bid, onSave, onCancel, onDelete, notify }) => {
   };
 
   const handleSave = () => {
-    // Valor final da licitação é baseado nos itens que foram vencidos (isWon = true)
     const finalValue = items.filter(it => it.isWon).reduce((acc, it) => {
       return acc + (parseFloat(it.wonPrice) || 0);
     }, 0);
@@ -446,9 +445,7 @@ const EditBidForm = ({ bid, onSave, onCancel, onDelete, notify }) => {
                 const wonPrice = parseFloat(item.wonPrice) || 0;
                 const expectedPrice = costPrice * 1.37;
                 
-                // Se venceu por menos que a referência e compensa o custo
                 const isViable = wonPrice > 0 && wonPrice >= expectedPrice && wonPrice <= refPrice;
-                // Se venceu, mas a margem está abaixo dos 37% calculados
                 const marginWarning = item.isWon && wonPrice > 0 && wonPrice < expectedPrice;
 
                 return (
@@ -518,7 +515,7 @@ const ProcessTracking = ({ bids, onUpdateStatus, onDelete, onUpdateData, notify 
   const [editingId, setEditingId] = useState(null);
   
   // Modal de confirmação de vitória (Total ou Parcial)
-  const [winModal, setWinModal] = useState(null); // { bid, type: 'won' | 'partial' }
+  const [winModal, setWinModal] = useState(null); 
   const [winItems, setWinItems] = useState([]);
 
   // IA Strategy Modal
@@ -799,7 +796,6 @@ const EmailDraftModal = ({ isOpen, onClose, bid, isLoading, emailText }) => {
   if (!isOpen) return null;
 
   const handleCopy = () => {
-    // navigator.clipboard.writeText is more standard but document.execCommand is required in some iframes
     const textArea = document.createElement("textarea");
     textArea.value = emailText;
     document.body.appendChild(textArea);
@@ -855,7 +851,6 @@ const Payments = ({ bids, onUpdateBid, onDelete, onUpdateData, notify }) => {
   const total = delivered.filter(b => b.status === 'delivered').reduce((acc, curr) => acc + parseFloat(curr.value || 0), 0);
   const [editingId, setEditingId] = useState(null);
 
-  // Estados do Modal do E-mail
   const [emailModalState, setEmailModalState] = useState({ isOpen: false, bid: null, loading: false, text: '' });
 
   const handleGenerateEmail = async (bid) => {
@@ -918,7 +913,6 @@ const Payments = ({ bids, onUpdateBid, onDelete, onUpdateData, notify }) => {
                   {parseFloat(bid.value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                 </p>
                 
-                {/* Botão de IA Visível no Mobile */}
                 {!bid.status.includes('paid') && (
                    <Button variant="ai" className="mt-3 px-3 py-1 text-xs shadow md:hidden w-full justify-center" onClick={() => handleGenerateEmail(bid)}>
                      <Sparkles size={14}/> ✨ Escrever E-mail de Cobrança
@@ -968,7 +962,6 @@ const Certificates = ({ notify }) => {
     if (!file) return;
     const formData = new FormData();
     formData.append('file', file);
-    // Guarda a data de validade no "type" do arquivo na VPS para não precisarmos alterar o banco
     formData.append('type', `certidao|${validity}`); 
 
     setLoading(true);
