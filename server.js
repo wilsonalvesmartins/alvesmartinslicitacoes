@@ -21,7 +21,6 @@ if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 console.log(`[Painel] Iniciando Servidor...`);
-console.log(`[Painel] Chave da IA configurada diretamente no código.`);
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // Aumentado para suportar PDFs em Base64
@@ -44,6 +43,11 @@ db.serialize(() => {
     id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT, originalName TEXT, type TEXT, createdAt TEXT
   )`);
 
+  // Nova tabela para configurações do sistema (Chave da API)
+  db.run(`CREATE TABLE IF NOT EXISTS settings (
+    id TEXT PRIMARY KEY, value TEXT
+  )`);
+
   // Migração de Segurança
   db.all("PRAGMA table_info(bids)", (err, rows) => {
     if (!err && rows) {
@@ -51,6 +55,16 @@ db.serialize(() => {
     }
   });
 });
+
+// --- FUNÇÃO AUXILIAR DE CONFIGURAÇÕES ---
+const getSetting = (key) => {
+  return new Promise((resolve, reject) => {
+    db.get("SELECT value FROM settings WHERE id = ?", [key], (err, row) => {
+      if (err) reject(err);
+      else resolve(row ? row.value : null);
+    });
+  });
+};
 
 // --- UPLOADS ---
 const storage = multer.diskStorage({
@@ -66,8 +80,12 @@ const upload = multer({ storage });
 
 app.post('/api/ai/extract', async (req, res) => {
   try {
-    // Chave inserida diretamente conforme solicitado
-    const apiKey = "AIzaSyCeFj1wLpyZqvUKGyTJhY2Z3h6WbuzS2Kg";
+    // Busca a chave diretamente do banco de dados (inserida via UI)
+    const apiKey = await getSetting('gemini_api_key');
+    
+    if (!apiKey) {
+      return res.status(400).json({ error: "Chave da API Gemini não configurada. Vá na aba 'Configurações' e insira sua chave." });
+    }
 
     const { base64Data, mimeType, prompt } = req.body;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
@@ -96,8 +114,12 @@ app.post('/api/ai/extract', async (req, res) => {
 
 app.post('/api/ai/generate', async (req, res) => {
   try {
-    // Chave inserida diretamente conforme solicitado
-    const apiKey = "AIzaSyCeFj1wLpyZqvUKGyTJhY2Z3h6WbuzS2Kg";
+    // Busca a chave diretamente do banco de dados (inserida via UI)
+    const apiKey = await getSetting('gemini_api_key');
+    
+    if (!apiKey) {
+      return res.status(400).json({ error: "Chave da API Gemini não configurada. Vá na aba 'Configurações' e insira sua chave." });
+    }
 
     const { prompt } = req.body;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
@@ -116,6 +138,26 @@ app.post('/api/ai/generate', async (req, res) => {
 });
 
 // --- API REGULAR ---
+
+// Rotas de Configuração
+app.get('/api/settings', (req, res) => {
+  db.all("SELECT * FROM settings", [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    const settingsObj = {};
+    rows.forEach(r => settingsObj[r.id] = r.value);
+    res.json(settingsObj);
+  });
+});
+
+app.post('/api/settings', (req, res) => {
+  const { id, value } = req.body;
+  db.run(`INSERT OR REPLACE INTO settings (id, value) VALUES (?, ?)`, [id, value], (err) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ success: true });
+  });
+});
+
+// Rotas de Bids
 app.get('/api/bids', (req, res) => {
   db.all("SELECT * FROM bids", [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -160,6 +202,7 @@ app.delete('/api/bids/:id', (req, res) => {
   });
 });
 
+// Rotas de Upload
 app.post('/api/upload', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).send('Arquivo não recebido.');
   db.run(`INSERT INTO files (filename, originalName, type, createdAt) VALUES (?, ?, ?, ?)`, 
