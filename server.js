@@ -92,8 +92,8 @@ app.post('/api/ai/extract', async (req, res) => {
 
     const { base64Data, mimeType, prompt } = req.body;
     
-    // Atualizado para o modelo flash-latest para evitar erros de versão
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+    // CORRIGIDO: Removido o "-latest", utilizando o nome base do modelo
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
     const payload = {
       contents: [{
@@ -131,7 +131,9 @@ app.post('/api/ai/generate', async (req, res) => {
     apiKey = apiKey.trim();
 
     const { prompt } = req.body;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+    
+    // CORRIGIDO: Removido o "-latest", utilizando o nome base do modelo
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
     const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
 
