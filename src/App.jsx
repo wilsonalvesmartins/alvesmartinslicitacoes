@@ -799,9 +799,18 @@ const EmailDraftModal = ({ isOpen, onClose, bid, isLoading, emailText }) => {
   if (!isOpen) return null;
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(emailText).then(() => {
+    // navigator.clipboard.writeText is more standard but document.execCommand is required in some iframes
+    const textArea = document.createElement("textarea");
+    textArea.value = emailText;
+    document.body.appendChild(textArea);
+    textArea.select();
+    try {
+      document.execCommand('copy');
       alert("Copiado para a área de transferência!");
-    });
+    } catch (err) {
+      console.error('Falha ao copiar', err);
+    }
+    document.body.removeChild(textArea);
   };
 
   return (
@@ -827,7 +836,7 @@ const EmailDraftModal = ({ isOpen, onClose, bid, isLoading, emailText }) => {
               </button>
               <textarea 
                 className="w-full h-full min-h-[200px] bg-transparent resize-none outline-none text-gray-700" 
-                value={emailText} 
+                defaultValue={emailText} 
                 readOnly
               />
             </>
