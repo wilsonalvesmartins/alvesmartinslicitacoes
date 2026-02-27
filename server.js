@@ -29,7 +29,7 @@ app.use(express.static(path.join(__dirname, 'dist'))); // Serve o React
 // --- BANCO DE DADOS ---
 const db = new sqlite3.Database(DB_PATH, (err) => {
   if (err) console.error('[Painel] Erro banco:', err.message);
-  else console.log('[Painel] Banco conectado.');
+  else console.log('[Painel] Banco conectado com sucesso.');
 });
 
 db.serialize(() => {
@@ -43,7 +43,7 @@ db.serialize(() => {
     id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT, originalName TEXT, type TEXT, createdAt TEXT
   )`);
 
-  // Nova tabela para configurações do sistema (Chave da API)
+  // Tabela para configurações do sistema
   db.run(`CREATE TABLE IF NOT EXISTS settings (
     id TEXT PRIMARY KEY, value TEXT
   )`);
@@ -78,19 +78,22 @@ const upload = multer({ storage });
 
 // --- ROTAS DA IA (GEMINI API) ---
 
+// Chave da API Hardcoded (Inserida diretamente como pedido)
+const DEFAULT_API_KEY = "AIzaSyCeFj1wLpyZqvUKGyTJhY2Z3h6WbuzS2Kg";
+
 app.post('/api/ai/extract', async (req, res) => {
   try {
-    // Busca a chave diretamente do banco de dados (inserida via UI)
-    const apiKey = await getSetting('gemini_api_key');
+    // Tenta pegar a chave do banco, se não existir, usa a chave hardcoded
+    let dbKey = await getSetting('gemini_api_key');
+    let apiKey = (dbKey && dbKey.trim() !== '') ? dbKey : DEFAULT_API_KEY;
     
-    if (!apiKey) {
-      return res.status(400).json({ error: "Chave da API Gemini não configurada. Vá na aba 'Configurações' e insira sua chave." });
-    }
+    // Remove espaços vazios que causam erro 404 na Google API
+    apiKey = apiKey.trim();
 
     const { base64Data, mimeType, prompt } = req.body;
     
-    // CORREÇÃO AQUI: Atualizado para o modelo público "gemini-1.5-flash"
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    // Atualizado para o modelo flash-latest para evitar erros de versão
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
 
     const payload = {
       contents: [{
@@ -104,7 +107,14 @@ app.post('/api/ai/extract', async (req, res) => {
     };
 
     const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    if (!response.ok) throw new Error(`Erro na API do Google: ${response.statusText}`);
+    
+    if (!response.ok) {
+      // Captura o erro exato da Google para mostrar no balão vermelho
+      const errorData = await response.json().catch(() => ({}));
+      const googleErrorMsg = errorData?.error?.message || response.statusText;
+      console.error(`[Painel] Erro Google API (${response.status}):`, googleErrorMsg);
+      throw new Error(`Google API (${response.status}): ${googleErrorMsg}`);
+    }
     
     const data = await response.json();
     res.json({ text: data.candidates[0].content.parts[0].text });
@@ -116,22 +126,22 @@ app.post('/api/ai/extract', async (req, res) => {
 
 app.post('/api/ai/generate', async (req, res) => {
   try {
-    // Busca a chave diretamente do banco de dados (inserida via UI)
-    const apiKey = await getSetting('gemini_api_key');
-    
-    if (!apiKey) {
-      return res.status(400).json({ error: "Chave da API Gemini não configurada. Vá na aba 'Configurações' e insira sua chave." });
-    }
+    let dbKey = await getSetting('gemini_api_key');
+    let apiKey = (dbKey && dbKey.trim() !== '') ? dbKey : DEFAULT_API_KEY;
+    apiKey = apiKey.trim();
 
     const { prompt } = req.body;
-    
-    // CORREÇÃO AQUI: Atualizado para o modelo público "gemini-1.5-flash"
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
 
     const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
 
     const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    if (!response.ok) throw new Error(`Erro na API do Google: ${response.statusText}`);
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const googleErrorMsg = errorData?.error?.message || response.statusText;
+      throw new Error(`Google API (${response.status}): ${googleErrorMsg}`);
+    }
     
     const data = await response.json();
     res.json({ text: data.candidates[0].content.parts[0].text });
