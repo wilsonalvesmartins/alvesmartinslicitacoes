@@ -21,7 +21,7 @@ if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' })); // Aumentado para suportar PDFs em Base64
 app.use(express.static(path.join(__dirname, 'dist'))); // Serve o React
 
 // --- BANCO DE DADOS ---
@@ -59,7 +59,61 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// --- API ---
+// --- ROTAS DA IA (GEMINI API) ---
+// Estas rotas escondem a sua chave da API do frontend e processam a IA com segurança
+
+app.post('/api/ai/extract', async (req, res) => {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: "Chave GEMINI_API_KEY não configurada no Painel Coolify." });
+
+    const { base64Data, mimeType, prompt } = req.body;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+    const payload = {
+      contents: [{
+        role: "user",
+        parts: [
+          { text: prompt },
+          { inlineData: { mimeType, data: base64Data } }
+        ]
+      }],
+      generationConfig: { responseMimeType: "application/json" }
+    };
+
+    const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (!response.ok) throw new Error(`Erro na API do Google: ${response.statusText}`);
+    
+    const data = await response.json();
+    res.json({ text: data.candidates[0].content.parts[0].text });
+  } catch (error) {
+    console.error("[Painel] Erro Extração IA:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/ai/generate', async (req, res) => {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: "Chave GEMINI_API_KEY não configurada no Painel Coolify." });
+
+    const { prompt } = req.body;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+    const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+
+    const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (!response.ok) throw new Error(`Erro na API do Google: ${response.statusText}`);
+    
+    const data = await response.json();
+    res.json({ text: data.candidates[0].content.parts[0].text });
+  } catch (error) {
+    console.error("[Painel] Erro Geração IA:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// --- API REGULAR ---
 app.get('/api/bids', (req, res) => {
   db.all("SELECT * FROM bids", [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
