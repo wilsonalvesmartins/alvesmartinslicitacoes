@@ -70,8 +70,49 @@ const Select = ({ label, options, ...props }) => (
 // --- INTEGRAÇÃO GEMINI IA ---
 const DEFAULT_API_KEY = "AIzaSyDzu2vw9yQBM21qt3kfPTdlsn44ktGNokE";
 
+let cachedModelName = null;
+let lastUsedKey = null;
+
+// FUNÇÃO MÁGICA: Em vez de adivinhar o modelo, o sistema consulta a Google para saber qual modelo a sua chave tem autorização para usar!
+const getValidModel = async (apiKey) => {
+  const cleanKey = apiKey.trim(); // Remove espaços em branco
+  if (cachedModelName && lastUsedKey === cleanKey) return cachedModelName;
+  
+  try {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`);
+    if (!response.ok) throw new Error("Chave de API inválida ou sem permissão de acesso.");
+    
+    const data = await response.json();
+    
+    if (!data.models || data.models.length === 0) {
+      throw new Error("Nenhum modelo disponível para esta chave. Tente gerar uma nova em aistudio.google.com");
+    }
+
+    const validModels = data.models.filter(m => m.supportedGenerationMethods?.includes('generateContent'));
+    
+    // Tenta encontrar o melhor modelo na lista dos autorizados
+    let selected = validModels.find(m => m.name === 'models/gemini-1.5-flash') ||
+                   validModels.find(m => m.name.includes('gemini-1.5-flash')) ||
+                   validModels.find(m => m.name.includes('gemini-1.5-pro')) ||
+                   validModels.find(m => m.name.includes('gemini-pro')) ||
+                   validModels[0]; // Se falhar tudo, usa o primeiro que funcionar
+                   
+    if (selected) {
+      cachedModelName = selected.name;
+      lastUsedKey = cleanKey;
+      return selected.name; // Vai retornar exatamente o nome que a Google exige (ex: "models/gemini-1.5-flash-8b")
+    }
+  } catch (err) {
+    console.warn("Aviso ao buscar modelos na Google API:", err);
+    throw err;
+  }
+  
+  return 'models/gemini-1.5-flash'; // Fallback de emergência
+};
+
 const extractWithGemini = async (base64Data, mimeType) => {
-  const currentKey = localStorage.getItem('gemini_api_key') || DEFAULT_API_KEY;
+  const currentKey = (localStorage.getItem('gemini_api_key') || DEFAULT_API_KEY).trim();
+  const modelName = await getValidModel(currentKey); // Pega o modelo dinamicamente
   
   const prompt = `Analise este documento de licitação/edital. Extraia as informações e retorne ESTRITAMENTE em formato JSON, sem marcações markdown.
   Estrutura esperada:
@@ -89,8 +130,7 @@ const extractWithGemini = async (base64Data, mimeType) => {
     ]
   }`;
 
-  // Trocado para gemini-1.5-pro
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${currentKey}`, {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${currentKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -113,14 +153,14 @@ const extractWithGemini = async (base64Data, mimeType) => {
   const data = await response.json();
   const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (textResponse) return JSON.parse(textResponse);
-  throw new Error("Resposta da IA vazia");
+  throw new Error("Resposta da IA vazia. O documento pode ser muito complexo.");
 };
 
 const generateTextWithGemini = async (prompt) => {
-  const currentKey = localStorage.getItem('gemini_api_key') || DEFAULT_API_KEY;
+  const currentKey = (localStorage.getItem('gemini_api_key') || DEFAULT_API_KEY).trim();
+  const modelName = await getValidModel(currentKey); // Pega o modelo dinamicamente
   
-  // Trocado para gemini-1.5-pro
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${currentKey}`, {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${currentKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
