@@ -3,10 +3,9 @@ import {
   LayoutDashboard, PlusCircle, Gavel, ThumbsDown, Trophy, 
   DollarSign, FileText, LogOut, Menu, X, Calendar, 
   Upload, Save, Download, Trash2, Loader2, Edit, CheckCircle, 
-  Sparkles, AlertTriangle, TrendingUp, DollarSignIcon, Shield, Copy, Settings
+  Sparkles, AlertTriangle, TrendingUp, DollarSignIcon, Shield, Copy
 } from 'lucide-react';
 
-// --- SISTEMA DE NOTIFICAÇÕES ---
 const Toast = ({ message, type, onClose }) => {
   useEffect(() => {
     const timer = setTimeout(onClose, 3000);
@@ -28,7 +27,6 @@ const Toast = ({ message, type, onClose }) => {
   );
 };
 
-// --- COMPONENTES UI REUTILIZÁVEIS ---
 const Card = ({ children, className = "" }) => (
   <div className={`bg-white rounded-lg shadow-md p-6 ${className}`}>
     {children}
@@ -182,13 +180,20 @@ const Dashboard = ({ bids }) => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
         <Card>
           <h3 className="font-bold text-lg mb-4 text-blue-900">Próximos Pregões</h3>
-          {bids.filter(b => b.status === 'pending').slice(0, 5).map(bid => (
+          {bids.filter(b => b.status === 'pending')
+            .sort((a, b) => {
+              const dateA = new Date(a.data + 'T' + (a.horario || '00:00'));
+              const dateB = new Date(b.data + 'T' + (b.horario || '00:00'));
+              return dateA - dateB; // Mais recente primeiro
+            })
+            .slice(0, 5)
+            .map(bid => (
             <div key={bid.id} className="flex justify-between items-center py-3 border-b last:border-0">
               <div>
-                <p className="font-medium text-gray-800">{bid.orgao}</p>
+                <p className="font-medium text-gray-800">{bid.modalidade} - {bid.orgao} - {bid.cidade}</p>
                 <p className="text-sm text-gray-500">{new Date(bid.data).toLocaleDateString()} - {bid.horario}</p>
               </div>
-              <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">{bid.modalidade}</span>
+              <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full shadow-sm">{bid.plataforma || 'N/A'}</span>
             </div>
           ))}
           {bids.filter(b => b.status === 'pending').length === 0 && <p className="text-gray-500">Nenhum pregão agendado no momento.</p>}
@@ -370,13 +375,12 @@ const EditBidForm = ({ bid, onSave, onCancel, onDelete, notify }) => {
   };
 
   const handleSave = () => {
-    const finalValue = items.filter(it => it.isWon).reduce((acc, it) => {
-      return acc + (parseFloat(it.wonPrice) || 0);
-    }, 0);
+    // Mantém o valor salvo existente
+    const finalValue = items.reduce((acc, it) => acc + (parseFloat(it.wonPrice) || 0), 0);
 
     onSave({
       ...localBid,
-      value: finalValue,
+      value: localBid.status === 'pending' ? localBid.value : finalValue,
       items: JSON.stringify(items)
     });
   };
@@ -401,16 +405,16 @@ const EditBidForm = ({ bid, onSave, onCancel, onDelete, notify }) => {
       </div>
 
       <div className="mb-6">
-        <h5 className="font-bold text-gray-700 mb-3 flex items-center gap-2"><TrendingUp size={18}/> Itens, Custos e Valores Vencidos</h5>
+        <h5 className="font-bold text-gray-700 mb-3 flex items-center gap-2"><TrendingUp size={18}/> Itens, Custos e Valores Ofertados</h5>
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
             <thead className="text-xs text-gray-700 uppercase bg-gray-100">
               <tr>
-                <th className="px-3 py-3 text-center rounded-tl">Ganhamos?</th>
-                <th className="px-4 py-3">Descrição</th>
-                <th className="px-4 py-3">Referência</th>
-                <th className="px-4 py-3 bg-blue-50">Custo (Seu Preço)</th>
-                <th className="px-4 py-3 bg-green-50">Valor Vencido (Ofertado)</th>
+                <th className="px-4 py-3 rounded-tl">Descrição</th>
+                <th className="px-4 py-3">Ref. (R$)</th>
+                <th className="px-4 py-3 bg-blue-50">Custo (R$)</th>
+                <th className="px-4 py-3 bg-green-50">Alvo (+37%)</th>
+                {localBid.status !== 'pending' && <th className="px-4 py-3 bg-yellow-50">Valor Fechado</th>}
                 <th className="px-4 py-3 rounded-tr">Status / Margem</th>
               </tr>
             </thead>
@@ -418,29 +422,29 @@ const EditBidForm = ({ bid, onSave, onCancel, onDelete, notify }) => {
               {items.map((item, idx) => {
                 const refPrice = parseFloat(item.referencePrice) || 0;
                 const costPrice = parseFloat(item.costPrice) || 0;
-                const wonPrice = parseFloat(item.wonPrice) || 0;
-                const expectedPrice = costPrice * 1.37;
-                
-                const isViable = wonPrice > 0 && wonPrice >= expectedPrice && wonPrice <= refPrice;
-                const marginWarning = item.isWon && wonPrice > 0 && wonPrice < expectedPrice;
+                const expectedPrice = costPrice > 0 ? costPrice * 1.37 : 0;
+                const isViable = expectedPrice > 0 && expectedPrice <= refPrice;
 
                 return (
-                  <tr key={item.id || idx} className={`border-b ${item.isWon ? 'bg-green-50/30' : ''}`}>
-                    <td className="px-3 py-2 text-center">
-                      <input type="checkbox" checked={item.isWon} onChange={e => updateItem(item.id, 'isWon', e.target.checked)} className="w-5 h-5 text-green-600 rounded focus:ring-green-500 cursor-pointer" />
-                    </td>
+                  <tr key={item.id || idx} className="border-b">
                     <td className="px-4 py-2 font-medium text-gray-900 truncate max-w-[200px]" title={item.description}>{item.description}</td>
-                    <td className="px-4 py-2 font-mono text-gray-500">{refPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td>
+                    <td className="px-4 py-2">
+                      <input type="number" step="0.01" className="w-24 p-1 border rounded bg-white text-right" value={item.referencePrice || ''} onChange={e => updateItem(item.id, 'referencePrice', e.target.value)} placeholder="0.00"/>
+                    </td>
                     <td className="px-4 py-2 bg-blue-50">
                       <input type="number" step="0.01" className="w-24 p-1 border rounded bg-white text-right" value={item.costPrice || ''} onChange={e => updateItem(item.id, 'costPrice', e.target.value)} placeholder="0.00"/>
                     </td>
-                    <td className="px-4 py-2 bg-green-50">
-                      <input type="number" step="0.01" disabled={!item.isWon} className={`w-28 p-1 border rounded text-right font-bold ${item.isWon ? 'bg-white text-green-700 border-green-300' : 'bg-gray-100 text-gray-400'}`} value={item.wonPrice || ''} onChange={e => updateItem(item.id, 'wonPrice', e.target.value)} placeholder="0.00"/>
+                    <td className="px-4 py-2 bg-green-50 font-mono font-bold text-green-700">
+                      {expectedPrice > 0 ? expectedPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-'}
                     </td>
+                    {localBid.status !== 'pending' && (
+                      <td className="px-4 py-2 bg-yellow-50">
+                        <input type="number" step="0.01" className="w-24 p-1 border rounded bg-white text-right" value={item.wonPrice || ''} onChange={e => updateItem(item.id, 'wonPrice', e.target.value)} placeholder="0.00"/>
+                      </td>
+                    )}
                     <td className="px-4 py-2">
-                      {!item.isWon ? <span className="text-gray-400 text-xs">-</span> : 
-                       isViable ? <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-bold">Boa Margem</span> : 
-                       marginWarning ? <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-bold" title={`Margem ideal era R$ ${expectedPrice.toFixed(2)}`}>Abaixo 37%</span> :
+                      {costPrice === 0 ? <span className="text-gray-400 text-xs">-</span> : 
+                       isViable ? <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-bold">Viável</span> : 
                        <span className="bg-red-100 text-red-800 px-2 py-1 rounded text-xs font-bold">Acima Ref.</span>}
                     </td>
                   </tr>
@@ -553,8 +557,8 @@ const ProcessTracking = ({ bids, onUpdateStatus, onDelete, onUpdateData, notify 
   };
 
   const filteredBids = bids.filter(b => b.status === 'pending').sort((a, b) => {
-    const dateA = new Date(a.data + 'T' + a.horario);
-    const dateB = new Date(b.data + 'T' + b.horario);
+    const dateA = new Date(a.data + 'T' + (a.horario || '00:00'));
+    const dateB = new Date(b.data + 'T' + (b.horario || '00:00'));
     return viewPast ? dateB - dateA : dateA - dateB;
   });
   const now = new Date();
@@ -604,7 +608,7 @@ const ProcessTracking = ({ bids, onUpdateStatus, onDelete, onUpdateData, notify 
                     <span className="font-bold text-xl text-gray-800">{bid.orgao}</span>
                     <span className="text-sm bg-gray-100 px-2 py-0.5 rounded text-gray-600 border">Pregão: {bid.numeroPregao}</span>
                   </div>
-                  <p className="text-gray-600">{bid.cidade} - {bid.plataforma}</p>
+                  <p className="text-gray-600 font-medium">{bid.modalidade} - {bid.cidade} - {bid.plataforma}</p>
                   <div className="flex items-center gap-4 mt-3 text-sm font-medium text-gray-600 bg-gray-50 p-2 rounded inline-flex">
                     <span className="flex items-center gap-1"><Calendar size={16} className="text-blue-500"/> {new Date(bid.data).toLocaleDateString()}</span>
                     <span className="flex items-center gap-1 text-blue-800">🕒 {bid.horario}</span>
@@ -1100,64 +1104,6 @@ const Invoices = ({ notify }) => {
   );
 };
 
-// --- MÓDULO DE CONFIGURAÇÕES ---
-const SettingsPage = ({ notify }) => {
-  const [apiKey, setApiKey] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    fetch('/api/settings')
-      .then(res => res.json())
-      .then(data => {
-        if (data.gemini_api_key) setApiKey(data.gemini_api_key);
-      })
-      .catch(err => console.error(err));
-  }, []);
-
-  const handleSave = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: 'gemini_api_key', value: apiKey })
-      });
-      if (res.ok) notify("Chave da API salva com sucesso!", "success");
-      else notify("Erro ao salvar configuração.", "error");
-    } catch (error) {
-      notify("Erro de conexão.", "error");
-    }
-    setLoading(false);
-  };
-
-  return (
-    <div className="space-y-6 max-w-3xl">
-      <h2 className="text-2xl font-bold text-blue-900 flex items-center gap-2"><Settings size={28}/> Configurações do Sistema</h2>
-      <Card>
-        <h3 className="text-lg font-bold text-gray-800 mb-4 border-b pb-2">Inteligência Artificial (Gemini)</h3>
-        <p className="text-sm text-gray-600 mb-4">Insira a sua chave de API do Google Gemini para habilitar as funções mágicas de extração de editais e geração de estratégias. A chave ficará salva com segurança na base de dados do seu Painel.</p>
-        
-        <div className="mb-4">
-          <label className="block text-sm font-bold text-gray-700 mb-1">Chave da API (API Key)</label>
-          <input 
-            type="password" 
-            className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none font-mono" 
-            value={apiKey} 
-            onChange={e => setApiKey(e.target.value)} 
-            placeholder="AIzaSy..." 
-          />
-        </div>
-        
-        <Button onClick={handleSave} disabled={loading} className="py-2">
-          {loading ? <Loader2 className="animate-spin" size={18} /> : <Save size={18}/>} 
-          Salvar Chave
-        </Button>
-      </Card>
-    </div>
-  );
-};
-
-
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentPage, setCurrentPage] = useState('dashboard');
@@ -1241,8 +1187,6 @@ export default function App() {
           <NavItem id="payments" icon={DollarSign} label="Pagamentos" />
           <NavItem id="certidoes" icon={Shield} label="Certidões e Docs" />
           <NavItem id="invoices" icon={FileText} label="Notas Fiscais" />
-          <div className="my-2 border-t border-blue-800 mx-4"></div>
-          <NavItem id="settings" icon={Settings} label="Configurações" />
         </nav>
         <div className="p-4 border-t border-blue-800"><button onClick={() => setIsAuthenticated(false)} className="flex items-center gap-2 text-blue-200 hover:text-white transition w-full"><LogOut size={18} /> Sair do Sistema</button></div>
       </aside>
@@ -1250,7 +1194,7 @@ export default function App() {
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
         <header className="bg-white shadow-sm p-4 flex justify-between items-center md:hidden z-10"><span className="font-bold text-blue-900">Alves Martins Licitações</span><button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>{isMobileMenuOpen ? <X /> : <Menu />}</button></header>
         {isMobileMenuOpen && (
-          <div className="absolute inset-0 bg-blue-900 z-50 flex flex-col md:hidden"><div className="flex justify-end p-4"><button onClick={() => setIsMobileMenuOpen(false)} className="text-white"><X size={28}/></button></div><nav className="flex-1 overflow-y-auto"><NavItem id="dashboard" icon={LayoutDashboard} label="Dashboard" /><NavItem id="insert" icon={PlusCircle} label="Inserir Pregão" /><NavItem id="tracking" icon={Gavel} label="Acompanhamento" /><NavItem id="won" icon={Trophy} label="Vencidos" /><NavItem id="lost" icon={ThumbsDown} label="Perdidos" /><NavItem id="payments" icon={DollarSign} label="Pagamentos" /><NavItem id="certidoes" icon={Shield} label="Certidões e Docs" /><NavItem id="invoices" icon={FileText} label="Notas Fiscais" /><div className="my-2 border-t border-blue-800 mx-4"></div><NavItem id="settings" icon={Settings} label="Configurações" /></nav></div>
+          <div className="absolute inset-0 bg-blue-900 z-50 flex flex-col md:hidden"><div className="flex justify-end p-4"><button onClick={() => setIsMobileMenuOpen(false)} className="text-white"><X size={28}/></button></div><nav className="flex-1 overflow-y-auto"><NavItem id="dashboard" icon={LayoutDashboard} label="Dashboard" /><NavItem id="insert" icon={PlusCircle} label="Inserir Pregão" /><NavItem id="tracking" icon={Gavel} label="Acompanhamento" /><NavItem id="won" icon={Trophy} label="Vencidos" /><NavItem id="lost" icon={ThumbsDown} label="Perdidos" /><NavItem id="payments" icon={DollarSign} label="Pagamentos" /><NavItem id="certidoes" icon={Shield} label="Certidões e Docs" /><NavItem id="invoices" icon={FileText} label="Notas Fiscais" /></nav></div>
         )}
         <main className="flex-1 overflow-auto p-4 md:p-8">
           {currentPage === 'dashboard' && <Dashboard bids={bids} />}
@@ -1261,7 +1205,6 @@ export default function App() {
           {currentPage === 'payments' && <Payments bids={bids} onUpdateBid={updateBidData} onDelete={handleDeleteBid} onUpdateData={updateBidData} notify={notify} />}
           {currentPage === 'certidoes' && <Certificates notify={notify} />}
           {currentPage === 'invoices' && <Invoices notify={notify} />}
-          {currentPage === 'settings' && <SettingsPage notify={notify} />}
         </main>
       </div>
     </div>
