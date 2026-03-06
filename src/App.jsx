@@ -3,7 +3,7 @@ import {
   LayoutDashboard, PlusCircle, Gavel, ThumbsDown, Trophy, 
   DollarSign, FileText, LogOut, Menu, X, Calendar, 
   Upload, Save, Download, Trash2, Loader2, Edit, CheckCircle, 
-  Sparkles, AlertTriangle, TrendingUp, DollarSignIcon, Shield, Copy
+  Sparkles, AlertTriangle, TrendingUp, DollarSignIcon, Shield, Copy, Settings
 } from 'lucide-react';
 
 const Toast = ({ message, type, onClose }) => {
@@ -68,7 +68,11 @@ const Select = ({ label, options, ...props }) => (
 );
 
 // --- INTEGRAÇÃO GEMINI IA ---
+const DEFAULT_API_KEY = "AIzaSyDzu2vw9yQBM21qt3kfPTdlsn44ktGNokE";
+
 const extractWithGemini = async (base64Data, mimeType) => {
+  const currentKey = localStorage.getItem('gemini_api_key') || DEFAULT_API_KEY;
+  
   const prompt = `Analise este documento de licitação/edital. Extraia as informações e retorne ESTRITAMENTE em formato JSON, sem marcações markdown.
   Estrutura esperada:
   {
@@ -85,35 +89,52 @@ const extractWithGemini = async (base64Data, mimeType) => {
     ]
   }`;
 
-  const response = await fetch('/api/ai/extract', {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${currentKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ base64Data: base64Data.split(',')[1], mimeType, prompt })
+    body: JSON.stringify({
+      contents: [{
+        role: "user",
+        parts: [
+          { text: prompt },
+          { inlineData: { mimeType, data: base64Data.split(',')[1] } }
+        ]
+      }],
+      generationConfig: { responseMimeType: "application/json" }
+    })
   });
   
   if (!response.ok) {
     const errorData = await response.json();
-    throw new Error(errorData.error || `HTTP erro: ${response.status}`);
+    throw new Error(errorData?.error?.message || `HTTP erro: ${response.status}`);
   }
   
   const data = await response.json();
-  return JSON.parse(data.text);
+  const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (textResponse) return JSON.parse(textResponse);
+  throw new Error("Resposta da IA vazia");
 };
 
 const generateTextWithGemini = async (prompt) => {
-  const response = await fetch('/api/ai/generate', {
+  const currentKey = localStorage.getItem('gemini_api_key') || DEFAULT_API_KEY;
+  
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${currentKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt })
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }]
+    })
   });
 
   if (!response.ok) {
     const errorData = await response.json();
-    throw new Error(errorData.error || `HTTP erro: ${response.status}`);
+    throw new Error(errorData?.error?.message || `HTTP erro: ${response.status}`);
   }
   
   const data = await response.json();
-  return data.text;
+  const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (textResponse) return textResponse;
+  throw new Error("Resposta da IA vazia");
 };
 
 // --- FUNÇÕES AUXILIARES DE DADOS ---
@@ -1104,6 +1125,49 @@ const Invoices = ({ notify }) => {
   );
 };
 
+// --- MÓDULO DE CONFIGURAÇÕES ---
+const SettingsPage = ({ notify }) => {
+  const [apiKey, setApiKey] = useState('');
+
+  useEffect(() => {
+    // Carrega a chave salva se houver
+    const saved = localStorage.getItem('gemini_api_key');
+    if (saved) setApiKey(saved);
+  }, []);
+
+  const handleSave = () => {
+    if (apiKey.trim()) {
+      localStorage.setItem('gemini_api_key', apiKey.trim());
+      notify("Chave salva com sucesso no seu navegador!", "success");
+    } else {
+      localStorage.removeItem('gemini_api_key');
+      notify("Chave padrão do sistema restaurada.", "info");
+    }
+  };
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <h2 className="text-2xl font-bold text-blue-900 flex items-center gap-2"><Settings size={28}/> Configurações</h2>
+      <Card>
+        <h3 className="text-lg font-bold text-gray-800 mb-4 border-b pb-2">API Gemini (Inteligência Artificial)</h3>
+        <p className="text-sm text-gray-600 mb-4">A chave oficial já está configurada. Você só precisa preencher este campo caso deseje utilizar uma chave de API própria.</p>
+        
+        <Input 
+          label="Chave de API Customizada (Opcional)" 
+          type="password" 
+          value={apiKey} 
+          onChange={e => setApiKey(e.target.value)} 
+          placeholder="Deixe em branco para usar a chave padrão..." 
+        />
+        
+        <Button onClick={handleSave} className="py-2 mt-2">
+          <Save size={18}/> Salvar Preferências
+        </Button>
+      </Card>
+    </div>
+  );
+};
+
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentPage, setCurrentPage] = useState('dashboard');
@@ -1187,6 +1251,8 @@ export default function App() {
           <NavItem id="payments" icon={DollarSign} label="Pagamentos" />
           <NavItem id="certidoes" icon={Shield} label="Certidões e Docs" />
           <NavItem id="invoices" icon={FileText} label="Notas Fiscais" />
+          <div className="my-2 border-t border-blue-800 mx-4"></div>
+          <NavItem id="settings" icon={Settings} label="Configurações" />
         </nav>
         <div className="p-4 border-t border-blue-800"><button onClick={() => setIsAuthenticated(false)} className="flex items-center gap-2 text-blue-200 hover:text-white transition w-full"><LogOut size={18} /> Sair do Sistema</button></div>
       </aside>
@@ -1194,7 +1260,7 @@ export default function App() {
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
         <header className="bg-white shadow-sm p-4 flex justify-between items-center md:hidden z-10"><span className="font-bold text-blue-900">Alves Martins Licitações</span><button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>{isMobileMenuOpen ? <X /> : <Menu />}</button></header>
         {isMobileMenuOpen && (
-          <div className="absolute inset-0 bg-blue-900 z-50 flex flex-col md:hidden"><div className="flex justify-end p-4"><button onClick={() => setIsMobileMenuOpen(false)} className="text-white"><X size={28}/></button></div><nav className="flex-1 overflow-y-auto"><NavItem id="dashboard" icon={LayoutDashboard} label="Dashboard" /><NavItem id="insert" icon={PlusCircle} label="Inserir Pregão" /><NavItem id="tracking" icon={Gavel} label="Acompanhamento" /><NavItem id="won" icon={Trophy} label="Vencidos" /><NavItem id="lost" icon={ThumbsDown} label="Perdidos" /><NavItem id="payments" icon={DollarSign} label="Pagamentos" /><NavItem id="certidoes" icon={Shield} label="Certidões e Docs" /><NavItem id="invoices" icon={FileText} label="Notas Fiscais" /></nav></div>
+          <div className="absolute inset-0 bg-blue-900 z-50 flex flex-col md:hidden"><div className="flex justify-end p-4"><button onClick={() => setIsMobileMenuOpen(false)} className="text-white"><X size={28}/></button></div><nav className="flex-1 overflow-y-auto"><NavItem id="dashboard" icon={LayoutDashboard} label="Dashboard" /><NavItem id="insert" icon={PlusCircle} label="Inserir Pregão" /><NavItem id="tracking" icon={Gavel} label="Acompanhamento" /><NavItem id="won" icon={Trophy} label="Vencidos" /><NavItem id="lost" icon={ThumbsDown} label="Perdidos" /><NavItem id="payments" icon={DollarSign} label="Pagamentos" /><NavItem id="certidoes" icon={Shield} label="Certidões e Docs" /><NavItem id="invoices" icon={FileText} label="Notas Fiscais" /><div className="my-2 border-t border-blue-800 mx-4"></div><NavItem id="settings" icon={Settings} label="Configurações" /></nav></div>
         )}
         <main className="flex-1 overflow-auto p-4 md:p-8">
           {currentPage === 'dashboard' && <Dashboard bids={bids} />}
@@ -1205,6 +1271,7 @@ export default function App() {
           {currentPage === 'payments' && <Payments bids={bids} onUpdateBid={updateBidData} onDelete={handleDeleteBid} onUpdateData={updateBidData} notify={notify} />}
           {currentPage === 'certidoes' && <Certificates notify={notify} />}
           {currentPage === 'invoices' && <Invoices notify={notify} />}
+          {currentPage === 'settings' && <SettingsPage notify={notify} />}
         </main>
       </div>
     </div>
