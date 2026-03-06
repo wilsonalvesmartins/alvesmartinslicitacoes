@@ -89,7 +89,8 @@ const extractWithGemini = async (base64Data, mimeType) => {
     ]
   }`;
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${currentKey}`, {
+  // Trocado para gemini-1.5-pro
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${currentKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -118,7 +119,8 @@ const extractWithGemini = async (base64Data, mimeType) => {
 const generateTextWithGemini = async (prompt) => {
   const currentKey = localStorage.getItem('gemini_api_key') || DEFAULT_API_KEY;
   
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${currentKey}`, {
+  // Trocado para gemini-1.5-pro
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${currentKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
