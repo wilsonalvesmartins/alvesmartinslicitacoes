@@ -20,11 +20,11 @@ const DB_PATH = path.join(DATA_DIR, 'grapaz.db');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-console.log(`[Painel] Iniciando Servidor...`);
+console.log(`[Painel] Iniciando Servidor V2 - Forçando limpeza de cache da IA...`);
 
 app.use(cors());
-app.use(express.json({ limit: '50mb' })); // Aumentado para suportar PDFs em Base64
-app.use(express.static(path.join(__dirname, 'dist'))); // Serve o React
+app.use(express.json({ limit: '50mb' }));
+app.use(express.static(path.join(__dirname, 'dist')));
 
 // --- BANCO DE DADOS ---
 const db = new sqlite3.Database(DB_PATH, (err) => {
@@ -43,12 +43,10 @@ db.serialize(() => {
     id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT, originalName TEXT, type TEXT, createdAt TEXT
   )`);
 
-  // Tabela para configurações do sistema
   db.run(`CREATE TABLE IF NOT EXISTS settings (
     id TEXT PRIMARY KEY, value TEXT
   )`);
 
-  // Migração de Segurança
   db.all("PRAGMA table_info(bids)", (err, rows) => {
     if (!err && rows) {
       if (!rows.some(r => r.name === 'plataforma')) db.run("ALTER TABLE bids ADD COLUMN plataforma TEXT");
@@ -56,7 +54,6 @@ db.serialize(() => {
   });
 });
 
-// --- FUNÇÃO AUXILIAR DE CONFIGURAÇÕES ---
 const getSetting = (key) => {
   return new Promise((resolve, reject) => {
     db.get("SELECT value FROM settings WHERE id = ?", [key], (err, row) => {
@@ -66,7 +63,6 @@ const getSetting = (key) => {
   });
 };
 
-// --- UPLOADS ---
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
   filename: (req, file, cb) => {
@@ -77,22 +73,17 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // --- ROTAS DA IA (GEMINI API) ---
-
-// Chave da API Hardcoded (Inserida diretamente como pedido)
 const DEFAULT_API_KEY = "AIzaSyCeFj1wLpyZqvUKGyTJhY2Z3h6WbuzS2Kg";
 
 app.post('/api/ai/extract', async (req, res) => {
   try {
-    // Tenta pegar a chave do banco, se não existir, usa a chave hardcoded
     let dbKey = await getSetting('gemini_api_key');
     let apiKey = (dbKey && dbKey.trim() !== '') ? dbKey : DEFAULT_API_KEY;
-    
-    // Remove espaços vazios que causam erro 404 na Google API
     apiKey = apiKey.trim();
 
     const { base64Data, mimeType, prompt } = req.body;
     
-    // CORRIGIDO: Removido o "-latest", utilizando o nome base do modelo
+    // NOME CORRETO DO MODELO OFICIAL (Sem o -latest que causa erro 404)
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
     const payload = {
@@ -109,7 +100,6 @@ app.post('/api/ai/extract', async (req, res) => {
     const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     
     if (!response.ok) {
-      // Captura o erro exato da Google para mostrar no balão vermelho
       const errorData = await response.json().catch(() => ({}));
       const googleErrorMsg = errorData?.error?.message || response.statusText;
       console.error(`[Painel] Erro Google API (${response.status}):`, googleErrorMsg);
@@ -131,8 +121,6 @@ app.post('/api/ai/generate', async (req, res) => {
     apiKey = apiKey.trim();
 
     const { prompt } = req.body;
-    
-    // CORRIGIDO: Removido o "-latest", utilizando o nome base do modelo
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
     const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
@@ -154,8 +142,6 @@ app.post('/api/ai/generate', async (req, res) => {
 });
 
 // --- API REGULAR ---
-
-// Rotas de Configuração
 app.get('/api/settings', (req, res) => {
   db.all("SELECT * FROM settings", [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -173,7 +159,6 @@ app.post('/api/settings', (req, res) => {
   });
 });
 
-// Rotas de Bids
 app.get('/api/bids', (req, res) => {
   db.all("SELECT * FROM bids", [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -218,7 +203,6 @@ app.delete('/api/bids/:id', (req, res) => {
   });
 });
 
-// Rotas de Upload
 app.post('/api/upload', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).send('Arquivo não recebido.');
   db.run(`INSERT INTO files (filename, originalName, type, createdAt) VALUES (?, ?, ?, ?)`, 
