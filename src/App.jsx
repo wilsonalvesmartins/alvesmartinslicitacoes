@@ -90,17 +90,15 @@ const getValidModel = async (apiKey) => {
 
     const validModels = data.models.filter(m => m.supportedGenerationMethods?.includes('generateContent'));
     
-    // Tenta encontrar o melhor modelo na lista dos autorizados
+    // Tenta encontrar o melhor modelo na lista dos autorizados (Prioridade máxima para o FLASH que é 100% gratuito)
     let selected = validModels.find(m => m.name === 'models/gemini-1.5-flash') ||
                    validModels.find(m => m.name.includes('gemini-1.5-flash')) ||
-                   validModels.find(m => m.name.includes('gemini-1.5-pro')) ||
-                   validModels.find(m => m.name.includes('gemini-pro')) ||
                    validModels[0]; // Se falhar tudo, usa o primeiro que funcionar
                    
     if (selected) {
       cachedModelName = selected.name;
       lastUsedKey = cleanKey;
-      return selected.name; // Vai retornar exatamente o nome que a Google exige (ex: "models/gemini-1.5-flash-8b")
+      return selected.name; // Retorna exatamente o nome que a Google exige (ex: "models/gemini-1.5-flash")
     }
   } catch (err) {
     console.warn("Aviso ao buscar modelos na Google API:", err);
@@ -130,6 +128,7 @@ const extractWithGemini = async (base64Data, mimeType) => {
     ]
   }`;
 
+  // CORREÇÃO AQUI: Usando o template literal ${modelName} em vez de fixar em gemini-1.5-pro
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${currentKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -160,6 +159,7 @@ const generateTextWithGemini = async (prompt) => {
   const currentKey = (localStorage.getItem('gemini_api_key') || DEFAULT_API_KEY).trim();
   const modelName = await getValidModel(currentKey); // Pega o modelo dinamicamente
   
+  // CORREÇÃO AQUI: Usando o template literal ${modelName} em vez de fixar em gemini-1.5-pro
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${currentKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
