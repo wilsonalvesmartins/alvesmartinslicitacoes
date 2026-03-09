@@ -6,6 +6,7 @@ import {
   Sparkles, AlertTriangle, TrendingUp, DollarSignIcon, Shield, Copy, Settings
 } from 'lucide-react';
 
+// --- SISTEMA DE NOTIFICAÇÕES ---
 const Toast = ({ message, type, onClose }) => {
   useEffect(() => {
     const timer = setTimeout(onClose, 3000);
@@ -27,6 +28,7 @@ const Toast = ({ message, type, onClose }) => {
   );
 };
 
+// --- COMPONENTES UI REUTILIZÁVEIS ---
 const Card = ({ children, className = "" }) => (
   <div className={`bg-white rounded-lg shadow-md p-6 ${className}`}>
     {children}
@@ -67,8 +69,48 @@ const Select = ({ label, options, ...props }) => (
   </div>
 );
 
-// --- INTEGRAÇÃO GEMINI IA ---
+// --- INTEGRAÇÃO GEMINI IA COM FALLBACK AUTOMÁTICO ---
 const DEFAULT_API_KEY = "AIzaSyDzu2vw9yQBM21qt3kfPTdlsn44ktGNokE";
+
+// Testa múltiplos modelos até encontrar o que a sua chave tem autorização para usar sem erros 404 ou limite 0.
+const callGeminiAPI = async (currentKey, payload) => {
+  const modelsToTry = [
+    'gemini-1.5-flash',
+    'gemini-1.5-pro',
+    'gemini-2.5-flash',
+    'gemini-1.5-flash-latest'
+  ];
+
+  let lastErrorMsg = "";
+
+  for (const model of modelsToTry) {
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${currentKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errMsg = errorData?.error?.message || `Erro HTTP ${response.status}`;
+        lastErrorMsg = `Modelo ${model}: ${errMsg}`;
+        console.warn(`[IA Fallback] Modelo ${model} recusado pela Google, a tentar o próximo...`);
+        continue; // Pula para o próximo modelo da lista
+      }
+      
+      return await response.json(); // Sucesso! Retorna os dados e pára o ciclo.
+
+    } catch (err) {
+      lastErrorMsg = err.message;
+      console.warn(`[IA Fallback] Erro de rede no modelo ${model}:`, err.message);
+      continue;
+    }
+  }
+
+  // Se esgotar todos os modelos, lança o erro final
+  throw new Error("A sua chave não tem permissão para nenhum modelo disponível ou a cota gratuita esgotou. Detalhe: " + lastErrorMsg);
+};
 
 const extractWithGemini = async (base64Data, mimeType) => {
   let currentKey = (localStorage.getItem('gemini_api_key') || DEFAULT_API_KEY).trim();
@@ -89,28 +131,18 @@ const extractWithGemini = async (base64Data, mimeType) => {
     ]
   }`;
 
-  // Utilizando o modelo flash direto, removendo a checagem que causava o erro de permissão no Google Cloud
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${currentKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{
-        role: "user",
-        parts: [
-          { text: prompt },
-          { inlineData: { mimeType, data: base64Data.split(',')[1] } }
-        ]
-      }],
-      generationConfig: { responseMimeType: "application/json" }
-    })
-  });
-  
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData?.error?.message || `Erro da Google API: ${response.status}`);
-  }
-  
-  const data = await response.json();
+  const payload = {
+    contents: [{
+      role: "user",
+      parts: [
+        { text: prompt },
+        { inlineData: { mimeType, data: base64Data.split(',')[1] } }
+      ]
+    }],
+    generationConfig: { responseMimeType: "application/json" }
+  };
+
+  const data = await callGeminiAPI(currentKey, payload);
   const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (textResponse) return JSON.parse(textResponse);
   throw new Error("Resposta da IA vazia. O documento pode ser muito complexo.");
@@ -119,20 +151,11 @@ const extractWithGemini = async (base64Data, mimeType) => {
 const generateTextWithGemini = async (prompt) => {
   let currentKey = (localStorage.getItem('gemini_api_key') || DEFAULT_API_KEY).trim();
   
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${currentKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }]
-    })
-  });
+  const payload = {
+    contents: [{ role: "user", parts: [{ text: prompt }] }]
+  };
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData?.error?.message || `Erro da Google API: ${response.status}`);
-  }
-  
-  const data = await response.json();
+  const data = await callGeminiAPI(currentKey, payload);
   const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (textResponse) return textResponse;
   throw new Error("Resposta da IA vazia");
@@ -244,7 +267,7 @@ const InsertBid = ({ onAdd, notify }) => {
     reader.onloadend = async () => {
       try {
         const base64data = reader.result;
-        notify("Analisando edital com IA... Aguarde.", "info");
+        notify("A analisar edital com IA... Aguarde.", "info");
         const extractedData = await extractWithGemini(base64data, file.type);
         
         setFormData(prev => ({
@@ -316,7 +339,7 @@ const InsertBid = ({ onAdd, notify }) => {
       setItems([]);
       notify("Pregão cadastrado com sucesso!", "success");
     } catch (error) {
-      notify("Erro ao salvar: " + error.message, "error");
+      notify("Erro ao guardar: " + error.message, "error");
     } finally {
       setLoading(false);
     }
@@ -380,7 +403,7 @@ const InsertBid = ({ onAdd, notify }) => {
         </Card>
 
         <Button type="submit" disabled={loading} className="w-full justify-center py-4 text-lg shadow-md">
-          {loading ? <Loader2 className="animate-spin"/> : <Save />} Salvar Processo Licitatório
+          {loading ? <Loader2 className="animate-spin"/> : <Save />} Guardar Processo Licitatório
         </Button>
       </form>
     </div>
@@ -482,7 +505,7 @@ const EditBidForm = ({ bid, onSave, onCancel, onDelete, notify }) => {
         <Button variant="danger" onClick={() => onDelete(bid.id)}><Trash2 size={16}/> Excluir Processo</Button>
         <div className="flex gap-3">
           <Button variant="secondary" onClick={onCancel}>Cancelar</Button>
-          <Button onClick={handleSave}><Save size={18}/> Salvar Processo</Button>
+          <Button onClick={handleSave}><Save size={18}/> Guardar Processo</Button>
         </div>
       </div>
     </Card>
@@ -552,7 +575,7 @@ const ProcessTracking = ({ bids, onUpdateStatus, onDelete, onUpdateData, notify 
       value: finalValue
     });
     
-    notify(`Processo registrado como ${winModal.type === 'won' ? 'Vencido' : 'Parcial'}!`, 'success');
+    notify(`Processo registado como ${winModal.type === 'won' ? 'Vencido' : 'Parcial'}!`, 'success');
     setWinModal(null);
   };
 
@@ -655,7 +678,7 @@ const ProcessTracking = ({ bids, onUpdateStatus, onDelete, onUpdateData, notify 
              <div className="flex justify-between items-center mb-6 border-b pb-4">
                <h3 className="text-2xl font-bold text-blue-900 flex items-center gap-2">
                  <Trophy className={winModal.type === 'won' ? 'text-yellow-500' : 'text-blue-500'} />
-                 {winModal.type === 'won' ? 'Registrar Vitória (Todos os Itens)' : 'Registrar Vitória Parcial'}
+                 {winModal.type === 'won' ? 'Registar Vitória (Todos os Itens)' : 'Registar Vitória Parcial'}
                </h3>
                <button onClick={() => setWinModal(null)} className="p-2 hover:bg-gray-100 rounded-full"><X size={24} className="text-gray-600"/></button>
              </div>
@@ -692,7 +715,7 @@ const ProcessTracking = ({ bids, onUpdateStatus, onDelete, onUpdateData, notify 
                </div>
                <div className="flex gap-3">
                  <Button variant="secondary" onClick={() => setWinModal(null)}>Cancelar</Button>
-                 <Button onClick={confirmWin} variant="success"><CheckCircle size={18}/> Salvar Vitória</Button>
+                 <Button onClick={confirmWin} variant="success"><CheckCircle size={18}/> Guardar Vitória</Button>
                </div>
              </div>
           </Card>
@@ -709,7 +732,7 @@ const GenericBidList = ({ title, bids, filterStatus, onSaveBid, onDeleteBid, onS
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold text-blue-900">{title}</h2>
-      {Object.keys(grouped).length === 0 && <p className="text-gray-500">Nenhum registro encontrado nesta categoria.</p>}
+      {Object.keys(grouped).length === 0 && <p className="text-gray-500">Nenhum registo encontrado nesta categoria.</p>}
       
       {Object.keys(grouped).map(city => (
         <div key={city} className="space-y-4">
@@ -786,7 +809,7 @@ const GenericBidCard = ({ bid, onSave, onDelete, onStatusChange, notify }) => {
                <input type="checkbox" className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500" checked={isDelivered} onChange={(e) => setIsDelivered(e.target.checked)} />
                <span className="text-sm font-bold text-gray-700">Produtos Entregues</span>
              </label>
-             <Button onClick={handleSave} className="flex items-center gap-2"><Save size={18} /> Salvar Prazos</Button>
+             <Button onClick={handleSave} className="flex items-center gap-2"><Save size={18} /> Guardar Prazos</Button>
            </>
         )}
       </div>
@@ -825,7 +848,7 @@ const EmailDraftModal = ({ isOpen, onClose, bid, isLoading, emailText }) => {
           {isLoading ? (
             <div className="flex flex-col items-center justify-center py-10 text-blue-600">
               <Loader2 className="animate-spin mb-2" size={32} />
-              <p>Escrevendo o e-mail...</p>
+              <p>A escrever o e-mail...</p>
             </div>
           ) : (
             <>
@@ -866,7 +889,7 @@ const Payments = ({ bids, onUpdateBid, onDelete, onUpdateData, notify }) => {
       const generatedText = await generateTextWithGemini(prompt);
       setEmailModalState({ isOpen: true, bid, loading: false, text: generatedText });
     } catch (error) {
-      setEmailModalState({ isOpen: true, bid, loading: false, text: error.message || 'Erro ao gerar o e-mail pela IA. Verifique sua chave.' });
+      setEmailModalState({ isOpen: true, bid, loading: false, text: error.message || 'Erro ao gerar o e-mail pela IA. Verifique a sua chave.' });
     }
   };
 
@@ -888,7 +911,7 @@ const Payments = ({ bids, onUpdateBid, onDelete, onUpdateData, notify }) => {
         </div>
       </div>
       
-      {delivered.length === 0 && <p className="text-gray-500">Nenhum processo aguardando pagamento.</p>}
+      {delivered.length === 0 && <p className="text-gray-500">Nenhum processo a aguardar pagamento.</p>}
       
       {delivered.map(bid => {
         if (editingId === bid.id) {
@@ -955,7 +978,7 @@ const Certificates = ({ notify }) => {
       if (!res.ok) throw new Error("Erro na rede");
       const data = await res.json();
       setFiles(data.filter(f => f.type && f.type.startsWith('certidao')));
-    } catch (error) { console.error("Sem conexão", error); }
+    } catch (error) { console.error("Sem ligação", error); }
   };
   useEffect(() => { fetchFiles(); }, []);
 
@@ -971,20 +994,20 @@ const Certificates = ({ notify }) => {
       const res = await fetch('/api/upload', { method: 'POST', body: formData });
       if (res.ok) { notify("Certidão arquivada com sucesso!", "success"); fetchFiles(); setValidity(''); }
       else notify("Erro ao enviar arquivo.", "error");
-    } catch (error) { notify("Erro de conexão.", "error"); } finally { setLoading(false); fileInputRef.current.value = ''; }
+    } catch (error) { notify("Erro de ligação ao servidor.", "error"); } finally { setLoading(false); fileInputRef.current.value = ''; }
   };
 
   const handleDeleteFile = async (id) => {
-    if(!confirm("Tem certeza que deseja apagar esta certidão?")) return;
+    if(!confirm("Tem a certeza que deseja apagar esta certidão?")) return;
     try {
       const res = await fetch(`/api/files/${id}`, { method: 'DELETE' });
-      if (res.ok) { notify("Arquivo excluído", "success"); fetchFiles(); }
-    } catch(e) { notify("Erro de conexão.", "error"); }
+      if (res.ok) { notify("Ficheiro excluído", "success"); fetchFiles(); }
+    } catch(e) { notify("Erro de ligação ao servidor.", "error"); }
   };
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-blue-900 flex items-center gap-2"><Shield /> Controle de Certidões</h2>
+      <h2 className="text-2xl font-bold text-blue-900 flex items-center gap-2"><Shield /> Controlo de Certidões</h2>
       
       <Card className="bg-blue-50 border border-blue-100">
         <h3 className="font-bold text-blue-800 mb-3">Adicionar Novo Documento</h3>
@@ -995,7 +1018,7 @@ const Certificates = ({ notify }) => {
            </div>
            <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept=".pdf,image/*" />
            <Button onClick={() => fileInputRef.current.click()} disabled={loading} className="w-full md:w-auto">
-             {loading ? <Loader2 className="animate-spin" size={18} /> : <Upload size={18} />} Selecionar Arquivo e Salvar
+             {loading ? <Loader2 className="animate-spin" size={18} /> : <Upload size={18} />} Selecionar Ficheiro e Guardar
            </Button>
         </div>
       </Card>
@@ -1003,7 +1026,7 @@ const Certificates = ({ notify }) => {
       <Card className="min-h-[300px]">
         <h3 className="text-lg font-bold text-gray-700 mb-4 border-b pb-2">Documentos da Empresa</h3>
         <div className="space-y-3">
-          {files.length === 0 && <p className="text-center py-10 text-gray-400">Nenhuma certidão cadastrada.</p>}
+          {files.length === 0 && <p className="text-center py-10 text-gray-400">Nenhuma certidão registada.</p>}
           {files.map(file => {
             const [baseType, expDate] = file.type.split('|');
             let isExpired = false;
@@ -1059,7 +1082,7 @@ const Invoices = ({ notify }) => {
       if (!res.ok) throw new Error("Erro na rede");
       const data = await res.json();
       setFiles({ entry: data.filter(f => f.type === 'entry'), exit: data.filter(f => f.type === 'exit') });
-    } catch (error) { console.error("Sem conexão com banco", error); }
+    } catch (error) { console.error("Sem ligação à base de dados", error); }
   };
   useEffect(() => { fetchFiles(); }, []);
 
@@ -1074,16 +1097,16 @@ const Invoices = ({ notify }) => {
     try {
       const res = await fetch('/api/upload', { method: 'POST', body: formData });
       if (res.ok) { notify("Nota Fiscal arquivada com sucesso!", "success"); fetchFiles(); }
-      else notify("Erro ao enviar arquivo.", "error");
-    } catch (error) { notify("Erro de conexão.", "error"); } finally { setLoading(false); fileInputRef.current.value = ''; }
+      else notify("Erro ao enviar ficheiro.", "error");
+    } catch (error) { notify("Erro de ligação.", "error"); } finally { setLoading(false); fileInputRef.current.value = ''; }
   };
 
   const handleDeleteFile = async (id) => {
-    if(!confirm("Tem certeza que deseja apagar esta nota?")) return;
+    if(!confirm("Tem a certeza que deseja apagar esta nota?")) return;
     try {
       const res = await fetch(`/api/files/${id}`, { method: 'DELETE' });
-      if (res.ok) { notify("Arquivo excluído", "success"); fetchFiles(); }
-    } catch(e) { notify("Erro de conexão.", "error"); }
+      if (res.ok) { notify("Ficheiro excluído", "success"); fetchFiles(); }
+    } catch(e) { notify("Erro de ligação.", "error"); }
   };
 
   const currentFiles = files[tab];
@@ -1094,7 +1117,7 @@ const Invoices = ({ notify }) => {
       <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept=".pdf,image/*" />
       <div className="flex border-b border-gray-200">
         <button className={`px-6 py-3 font-medium ${tab === 'entry' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-blue-500'}`} onClick={() => setTab('entry')}>Notas de Entrada (Custos)</button>
-        <button className={`px-6 py-3 font-medium ${tab === 'exit' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-blue-500'}`} onClick={() => setTab('exit')}>Notas de Saída (Faturamento)</button>
+        <button className={`px-6 py-3 font-medium ${tab === 'exit' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-blue-500'}`} onClick={() => setTab('exit')}>Notas de Saída (Faturação)</button>
       </div>
       <Card className="min-h-[300px]">
         <div className="flex justify-between items-center mb-6">
@@ -1139,7 +1162,7 @@ const SettingsPage = ({ notify }) => {
   const handleSave = () => {
     if (apiKey.trim()) {
       localStorage.setItem('gemini_api_key', apiKey.trim());
-      notify("Chave salva com sucesso no seu navegador!", "success");
+      notify("Chave guardada com sucesso no seu navegador!", "success");
     } else {
       localStorage.removeItem('gemini_api_key');
       notify("Chave padrão do sistema restaurada.", "info");
@@ -1151,7 +1174,7 @@ const SettingsPage = ({ notify }) => {
       <h2 className="text-2xl font-bold text-blue-900 flex items-center gap-2"><Settings size={28}/> Configurações</h2>
       <Card>
         <h3 className="text-lg font-bold text-gray-800 mb-4 border-b pb-2">API Gemini (Inteligência Artificial)</h3>
-        <p className="text-sm text-gray-600 mb-4">A chave oficial já está configurada. Você só precisa preencher este campo caso deseje utilizar uma chave de API própria.</p>
+        <p className="text-sm text-gray-600 mb-4">A chave oficial já está configurada. Só precisa de preencher este campo caso deseje utilizar uma chave de API própria.</p>
         
         <Input 
           label="Chave de API Customizada (Opcional)" 
@@ -1162,7 +1185,7 @@ const SettingsPage = ({ notify }) => {
         />
         
         <Button onClick={handleSave} className="py-2 mt-2">
-          <Save size={18}/> Salvar Preferências
+          <Save size={18}/> Guardar Preferências
         </Button>
       </Card>
     </div>
@@ -1204,11 +1227,11 @@ export default function App() {
 
   const updateBidStatus = async (bid, newStatus) => {
     await updateBidData(bid, { status: newStatus });
-    notify(`Status atualizado para ${newStatus === 'won' ? 'Vencido' : newStatus === 'lost' ? 'Perdido' : 'Parcial'}`, 'success');
+    notify(`Estado atualizado para ${newStatus === 'won' ? 'Vencido' : newStatus === 'lost' ? 'Perdido' : 'Parcial'}`, 'success');
   };
 
   const handleDeleteBid = async (id) => {
-    if (!confirm("Tem certeza que deseja apagar permanentemente este processo?")) return;
+    if (!confirm("Tem a certeza que deseja apagar permanentemente este processo?")) return;
     try {
       await fetch(`/api/bids/${id}`, { method: 'DELETE' });
       await loadData();
@@ -1219,10 +1242,10 @@ export default function App() {
   const handleSaveBid = async (updatedBid, shouldDeliver) => {
     if (shouldDeliver) {
       updatedBid.status = 'delivered';
-      notify("Concluído! Encaminhado para Faturamento.", "success");
+      notify("Concluído! Encaminhado para Faturação.", "success");
       setCurrentPage('payments');
     } else {
-      notify("Informações salvas com sucesso.", "success");
+      notify("Informações guardadas com sucesso.", "success");
     }
     await updateBidData(updatedBid, {});
   };
