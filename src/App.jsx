@@ -3,10 +3,9 @@ import {
   LayoutDashboard, PlusCircle, Gavel, ThumbsDown, Trophy, 
   DollarSign, FileText, LogOut, Menu, X, Calendar, 
   Upload, Save, Download, Trash2, Loader2, Edit, CheckCircle, 
-  Sparkles, AlertTriangle, TrendingUp, DollarSignIcon, Shield, Copy, Settings
+  AlertTriangle, TrendingUp, DollarSignIcon, Shield, FileSpreadsheet
 } from 'lucide-react';
 
-// --- SISTEMA DE NOTIFICAÇÕES ---
 const Toast = ({ message, type, onClose }) => {
   useEffect(() => {
     const timer = setTimeout(onClose, 3000);
@@ -28,7 +27,6 @@ const Toast = ({ message, type, onClose }) => {
   );
 };
 
-// --- COMPONENTES UI REUTILIZÁVEIS ---
 const Card = ({ children, className = "" }) => (
   <div className={`bg-white rounded-lg shadow-md p-6 ${className}`}>
     {children}
@@ -43,7 +41,6 @@ const Button = ({ children, onClick, variant = "primary", className = "", type =
     danger: "bg-red-100 text-red-700 hover:bg-red-200",
     success: "bg-green-100 text-green-700 hover:bg-green-200",
     outline: "border border-blue-700 text-blue-700 hover:bg-blue-50",
-    ai: "bg-purple-600 text-white hover:bg-purple-700",
     ghost: "bg-transparent text-gray-600 hover:bg-gray-100 hover:text-red-600 px-2"
   };
   return (
@@ -69,99 +66,7 @@ const Select = ({ label, options, ...props }) => (
   </div>
 );
 
-// --- INTEGRAÇÃO GEMINI IA COM FALLBACK AUTOMÁTICO ---
-const DEFAULT_API_KEY = "AIzaSyDzu2vw9yQBM21qt3kfPTdlsn44ktGNokE";
-
-// Testa múltiplos modelos até encontrar o que a sua chave tem autorização para usar sem erros 404 ou limite 0.
-const callGeminiAPI = async (currentKey, payload) => {
-  const modelsToTry = [
-    'gemini-1.5-flash',
-    'gemini-1.5-pro',
-    'gemini-2.5-flash',
-    'gemini-1.5-flash-latest'
-  ];
-
-  let lastErrorMsg = "";
-
-  for (const model of modelsToTry) {
-    try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${currentKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const errMsg = errorData?.error?.message || `Erro HTTP ${response.status}`;
-        lastErrorMsg = `Modelo ${model}: ${errMsg}`;
-        console.warn(`[IA Fallback] Modelo ${model} recusado pela Google, a tentar o próximo...`);
-        continue; // Pula para o próximo modelo da lista
-      }
-      
-      return await response.json(); // Sucesso! Retorna os dados e pára o ciclo.
-
-    } catch (err) {
-      lastErrorMsg = err.message;
-      console.warn(`[IA Fallback] Erro de rede no modelo ${model}:`, err.message);
-      continue;
-    }
-  }
-
-  // Se esgotar todos os modelos, lança o erro final
-  throw new Error("A sua chave não tem permissão para nenhum modelo disponível ou a cota gratuita esgotou. Detalhe: " + lastErrorMsg);
-};
-
-const extractWithGemini = async (base64Data, mimeType) => {
-  let currentKey = (localStorage.getItem('gemini_api_key') || DEFAULT_API_KEY).trim();
-  
-  const prompt = `Analise este documento de licitação/edital. Extraia as informações e retorne ESTRITAMENTE em formato JSON, sem marcações markdown.
-  Estrutura esperada:
-  {
-    "orgao": "Nome do Órgão",
-    "cidade": "Cidade",
-    "plataforma": "Plataforma (ex: Comprasnet, BLL)",
-    "numeroPregao": "Número do Pregão",
-    "processo": "Número do Processo",
-    "data": "Data no formato YYYY-MM-DD",
-    "horario": "Horário no formato HH:MM",
-    "modalidade": "Pregão Eletrônico, Pregão Presencial, Dispensa Eletrônica, Chamamento Público ou Concorrência",
-    "items": [
-      { "description": "Descrição do Item", "referencePrice": valor_numerico_float }
-    ]
-  }`;
-
-  const payload = {
-    contents: [{
-      role: "user",
-      parts: [
-        { text: prompt },
-        { inlineData: { mimeType, data: base64Data.split(',')[1] } }
-      ]
-    }],
-    generationConfig: { responseMimeType: "application/json" }
-  };
-
-  const data = await callGeminiAPI(currentKey, payload);
-  const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (textResponse) return JSON.parse(textResponse);
-  throw new Error("Resposta da IA vazia. O documento pode ser muito complexo.");
-};
-
-const generateTextWithGemini = async (prompt) => {
-  let currentKey = (localStorage.getItem('gemini_api_key') || DEFAULT_API_KEY).trim();
-  
-  const payload = {
-    contents: [{ role: "user", parts: [{ text: prompt }] }]
-  };
-
-  const data = await callGeminiAPI(currentKey, payload);
-  const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (textResponse) return textResponse;
-  throw new Error("Resposta da IA vazia");
-};
-
-// --- FUNÇÕES AUXILIARES DE DADOS ---
+// --- FUNÇÕES AUXILIARES ---
 const parseItems = (itemsData) => {
   if (!itemsData) return [];
   if (typeof itemsData === 'string') {
@@ -169,6 +74,22 @@ const parseItems = (itemsData) => {
     catch (e) { return [{ id: Date.now(), description: itemsData, referencePrice: 0, costPrice: 0, isWon: false, wonPrice: 0 }]; }
   }
   return itemsData;
+};
+
+// Leitor de CSV que ignora vírgulas dentro de aspas
+const parseCSVRow = (text) => {
+  let result = [];
+  let startValueBnd = 0;
+  let isQuote = false;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '"') isQuote = !isQuote;
+    if (text[i] === ',' && !isQuote) {
+      result.push(text.substring(startValueBnd, i));
+      startValueBnd = i + 1;
+    }
+  }
+  result.push(text.substring(startValueBnd));
+  return result.map(v => v.replace(/^"|"$/g, '').trim());
 };
 
 // --- TELAS DO SISTEMA ---
@@ -250,7 +171,7 @@ const Dashboard = ({ bids }) => {
 
 const InsertBid = ({ onAdd, notify }) => {
   const [loading, setLoading] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
+  const [csvLoading, setCsvLoading] = useState(false);
   const fileInputRef = useRef(null);
   const [items, setItems] = useState([]);
   
@@ -258,52 +179,56 @@ const InsertBid = ({ onAdd, notify }) => {
     orgao: '', cidade: '', plataforma: '', numeroPregao: '', processo: '', data: '', horario: '', modalidade: 'Pregão Eletrônico' 
   });
 
-  const handleAIUpload = (e) => {
+  const handleCsvUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    setAiLoading(true);
+    setCsvLoading(true);
     const reader = new FileReader();
-    reader.onloadend = async () => {
+    reader.onload = (event) => {
       try {
-        const base64data = reader.result;
-        notify("A analisar edital com IA... Aguarde.", "info");
-        const extractedData = await extractWithGemini(base64data, file.type);
+        const text = event.target.result;
+        const lines = text.split(/\r?\n/).filter(line => line.trim());
+        const newItems = [];
         
-        setFormData(prev => ({
-          ...prev,
-          orgao: extractedData.orgao || prev.orgao,
-          cidade: extractedData.cidade || prev.cidade,
-          plataforma: extractedData.plataforma || prev.plataforma,
-          numeroPregao: extractedData.numeroPregao || prev.numeroPregao,
-          processo: extractedData.processo || prev.processo,
-          data: extractedData.data || prev.data,
-          horario: extractedData.horario || prev.horario,
-          modalidade: extractedData.modalidade || prev.modalidade
-        }));
-
-        if (extractedData.items && Array.isArray(extractedData.items)) {
-          const formattedItems = extractedData.items.map((it, idx) => ({
-            id: Date.now() + idx,
-            description: it.description || '',
-            referencePrice: parseFloat(it.referencePrice) || 0,
-            costPrice: 0,
-            isWon: false,
-            wonPrice: 0
-          }));
-          setItems(formattedItems);
+        // Pula o cabeçalho (começa do índice 1)
+        for (let i = 1; i < lines.length; i++) {
+          const row = parseCSVRow(lines[i]);
+          
+          if (row.length >= 2) {
+            let desc = row[0];
+            // Trata o número do último campo, substituindo vírgula por ponto (caso venha em formato PT-BR)
+            let valStr = row[row.length - 1].replace(',', '.');
+            let val = parseFloat(valStr);
+            
+            if (!isNaN(val)) {
+              newItems.push({
+                id: Date.now() + i,
+                description: desc,
+                referencePrice: val,
+                costPrice: 0,
+                isWon: false,
+                wonPrice: 0
+              });
+            }
+          }
         }
 
-        notify("Dados extraídos com sucesso!", "success");
+        if (newItems.length > 0) {
+          setItems(prevItems => [...prevItems, ...newItems]);
+          notify(`${newItems.length} itens importados com sucesso!`, "success");
+        } else {
+          notify("Nenhum item com valor numérico encontrado na planilha.", "error");
+        }
       } catch (error) {
         console.error(error);
-        notify(error.message || "Erro ao processar documento com IA. Verifique a chave na aba Configurações.", "error");
+        notify("Erro ao processar o arquivo CSV. Verifique o formato.", "error");
       } finally {
-        setAiLoading(false);
+        setCsvLoading(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
       }
     };
-    reader.readAsDataURL(file);
+    reader.readAsText(file, 'UTF-8');
   };
 
   const addItem = () => {
@@ -347,23 +272,23 @@ const InsertBid = ({ onAdd, notify }) => {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      <Card className="bg-gradient-to-r from-blue-900 to-blue-800 text-white border-0">
+      <Card className="bg-gradient-to-r from-blue-800 to-blue-700 text-white border-0">
         <div className="flex flex-col md:flex-row justify-between items-center gap-4">
           <div>
-            <h2 className="text-2xl font-bold flex items-center gap-2"><Sparkles className="text-yellow-400"/> Assistente IA de Edital</h2>
-            <p className="text-blue-200 text-sm mt-1">Faça upload do edital (PDF/Imagem) para preencher os dados e itens automaticamente.</p>
+            <h2 className="text-2xl font-bold flex items-center gap-2"><FileSpreadsheet className="text-blue-200"/> Importação Rápida</h2>
+            <p className="text-blue-100 text-sm mt-1">Carregue um arquivo .CSV com duas colunas (Item e Valor) para preencher a lista automaticamente.</p>
           </div>
-          <input type="file" ref={fileInputRef} onChange={handleAIUpload} className="hidden" accept="application/pdf,image/*" />
-          <Button variant="ai" onClick={() => fileInputRef.current.click()} disabled={aiLoading} className="whitespace-nowrap shadow-lg">
-            {aiLoading ? <Loader2 className="animate-spin" size={20} /> : <Upload size={20} />} 
-            {aiLoading ? 'Analisando Edital...' : 'Carregar Edital'}
+          <input type="file" ref={fileInputRef} onChange={handleCsvUpload} className="hidden" accept=".csv" />
+          <Button variant="secondary" onClick={() => fileInputRef.current.click()} disabled={csvLoading} className="whitespace-nowrap shadow-lg text-blue-900">
+            {csvLoading ? <Loader2 className="animate-spin" size={20} /> : <Upload size={20} />} 
+            {csvLoading ? 'Lendo Planilha...' : 'Carregar CSV'}
           </Button>
         </div>
       </Card>
 
       <form onSubmit={handleSubmit}>
         <Card className="mb-6">
-          <h3 className="text-lg font-bold text-blue-900 mb-4 border-b pb-2">Dados Principais</h3>
+          <h3 className="text-lg font-bold text-blue-900 mb-4 border-b pb-2">Dados Principais (Preenchimento Manual)</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <Input label="Órgão" required value={formData.orgao} onChange={e => setFormData({...formData, orgao: e.target.value})} />
             <Input label="Cidade" required value={formData.cidade} onChange={e => setFormData({...formData, cidade: e.target.value})} />
@@ -379,7 +304,7 @@ const InsertBid = ({ onAdd, notify }) => {
         <Card className="mb-6">
           <div className="flex justify-between items-center mb-4 border-b pb-2">
             <h3 className="text-lg font-bold text-blue-900">Itens da Licitação</h3>
-            <Button variant="outline" onClick={addItem} className="text-sm py-1"><PlusCircle size={16}/> Adicionar Item</Button>
+            <Button variant="outline" onClick={addItem} className="text-sm py-1"><PlusCircle size={16}/> Adicionar Item Manual</Button>
           </div>
           
           <div className="space-y-3">
@@ -398,7 +323,7 @@ const InsertBid = ({ onAdd, notify }) => {
                 </div>
               </div>
             ))}
-            {items.length === 0 && <p className="text-center text-gray-400 py-6 border-2 border-dashed rounded">Nenhum item cadastrado. Adicione manualmente ou use a IA.</p>}
+            {items.length === 0 && <p className="text-center text-gray-400 py-6 border-2 border-dashed rounded">A lista de itens está vazia. Carregue uma planilha CSV ou adicione manualmente.</p>}
           </div>
         </Card>
 
@@ -410,7 +335,6 @@ const InsertBid = ({ onAdd, notify }) => {
   );
 };
 
-// Componente para Edição com Calculadora de Custo (Margem 37%)
 const EditBidForm = ({ bid, onSave, onCancel, onDelete, notify }) => {
   const [localBid, setLocalBid] = useState(bid);
   const [items, setItems] = useState(parseItems(bid.items));
@@ -420,7 +344,6 @@ const EditBidForm = ({ bid, onSave, onCancel, onDelete, notify }) => {
   };
 
   const handleSave = () => {
-    // Mantém o valor salvo existente
     const finalValue = items.reduce((acc, it) => acc + (parseFloat(it.wonPrice) || 0), 0);
 
     onSave({
@@ -512,39 +435,12 @@ const EditBidForm = ({ bid, onSave, onCancel, onDelete, notify }) => {
   );
 };
 
-// Modal Genérico de IA
-const AIAnalysisModal = ({ isOpen, onClose, title, content, isLoading }) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <Card className="w-full max-w-2xl shadow-2xl relative border-t-4 border-purple-500">
-        <button onClick={onClose} className="absolute top-4 right-4 p-2 hover:bg-gray-100 rounded-full"><X size={20}/></button>
-        <h3 className="text-xl font-bold text-purple-900 flex items-center gap-2 mb-4">
-          <Sparkles className="text-purple-500"/> {title}
-        </h3>
-        <div className="bg-purple-50 p-4 rounded-lg min-h-[150px] whitespace-pre-wrap text-gray-700">
-          {isLoading ? (
-            <div className="flex flex-col items-center justify-center py-8 text-purple-600">
-              <Loader2 className="animate-spin mb-2" size={32} />
-              <p>Processando inteligência artificial...</p>
-            </div>
-          ) : content}
-        </div>
-      </Card>
-    </div>
-  );
-};
-
 const ProcessTracking = ({ bids, onUpdateStatus, onDelete, onUpdateData, notify }) => {
   const [viewPast, setViewPast] = useState(false);
   const [editingId, setEditingId] = useState(null);
   
-  // Modal de confirmação de vitória (Total ou Parcial)
   const [winModal, setWinModal] = useState(null); 
   const [winItems, setWinItems] = useState([]);
-
-  // IA Strategy Modal
-  const [aiModalInfo, setAiModalInfo] = useState({ isOpen: false, content: '', loading: false });
 
   useEffect(() => {
     if (winModal) {
@@ -579,28 +475,6 @@ const ProcessTracking = ({ bids, onUpdateStatus, onDelete, onUpdateData, notify 
     setWinModal(null);
   };
 
-  const handleAIStrategy = async (bid) => {
-    setAiModalInfo({ isOpen: true, content: '', loading: true });
-    try {
-      const itemsList = parseItems(bid.items).map(i => `- ${i.description} (Ref: R$ ${i.referencePrice} / Custo Previsto: R$ ${i.costPrice || 'Não informado'})`).join('\n');
-      const prompt = `Você é um consultor especialista em licitações públicas no Brasil atuando pela empresa Alves Martins Licitações.
-      Avalie o seguinte pregão iminente:
-      Órgão: ${bid.orgao} (Pregão ${bid.numeroPregao} - ${bid.modalidade})
-      Plataforma: ${bid.plataforma}
-      
-      Itens cotados:
-      ${itemsList}
-
-      A margem de lucro padrão almejada pela empresa é de 37% acima do custo previsto.
-      Forneça uma breve análise (no máximo 3 parágrafos curtos) avaliando a atratividade deste pregão, sugerindo estratégias de lances (agressividade ou cautela) e pontos de atenção com base nos valores informados.`;
-      
-      const analysis = await generateTextWithGemini(prompt);
-      setAiModalInfo({ isOpen: true, content: analysis, loading: false });
-    } catch (error) {
-      setAiModalInfo({ isOpen: true, content: error.message || "Ocorreu um erro ao gerar a estratégia. Verifique a chave de API na aba Configurações.", loading: false });
-    }
-  };
-
   const filteredBids = bids.filter(b => b.status === 'pending').sort((a, b) => {
     const dateA = new Date(a.data + 'T' + (a.horario || '00:00'));
     const dateB = new Date(b.data + 'T' + (b.horario || '00:00'));
@@ -610,14 +484,6 @@ const ProcessTracking = ({ bids, onUpdateStatus, onDelete, onUpdateData, notify 
 
   return (
     <div className="space-y-6">
-      <AIAnalysisModal 
-        isOpen={aiModalInfo.isOpen} 
-        onClose={() => setAiModalInfo({ ...aiModalInfo, isOpen: false })} 
-        title="Análise Estratégica IA" 
-        content={aiModalInfo.content} 
-        isLoading={aiModalInfo.loading} 
-      />
-
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-blue-900">Acompanhamento e Estratégia</h2>
         <div className="bg-gray-200 p-1 rounded-lg flex">
@@ -641,9 +507,6 @@ const ProcessTracking = ({ bids, onUpdateStatus, onDelete, onUpdateData, notify 
           return (
             <Card key={bid.id} className="relative border-l-4 border-blue-500 hover:shadow-lg transition">
                <div className="absolute top-4 right-4 flex gap-2">
-                 <Button variant="ai" className="px-2 py-1 text-xs shadow" onClick={() => handleAIStrategy(bid)} title="Consultar IA sobre estratégia">
-                   <Sparkles size={14}/> ✨ IA
-                 </Button>
                  <button onClick={() => setEditingId(bid.id)} className="p-2 text-gray-500 bg-gray-100 rounded hover:bg-blue-100 hover:text-blue-600 transition" title="Editar Itens e Custos"><Edit size={16}/></button>
                </div>
 
@@ -817,92 +680,13 @@ const GenericBidCard = ({ bid, onSave, onDelete, onStatusChange, notify }) => {
   );
 };
 
-const EmailDraftModal = ({ isOpen, onClose, bid, isLoading, emailText }) => {
-  if (!isOpen) return null;
-
-  const handleCopy = () => {
-    const textArea = document.createElement("textarea");
-    textArea.value = emailText;
-    document.body.appendChild(textArea);
-    textArea.select();
-    try {
-      document.execCommand('copy');
-      alert("Copiado para a área de transferência!");
-    } catch (err) {
-      console.error('Falha ao copiar', err);
-    }
-    document.body.removeChild(textArea);
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <Card className="w-full max-w-2xl shadow-2xl relative border-t-4 border-blue-600">
-        <button onClick={onClose} className="absolute top-4 right-4 p-2 hover:bg-gray-100 rounded-full"><X size={20}/></button>
-        <h3 className="text-xl font-bold text-blue-900 flex items-center gap-2 mb-4">
-          <Sparkles className="text-blue-500"/> E-mail Gerado por IA
-        </h3>
-        <p className="text-gray-600 mb-4 text-sm">
-          A Inteligência Artificial rascunhou este e-mail de cobrança baseado nos dados do processo. Edite se necessário antes de enviar.
-        </p>
-        <div className="bg-gray-50 p-4 rounded-lg min-h-[200px] border border-gray-200 relative">
-          {isLoading ? (
-            <div className="flex flex-col items-center justify-center py-10 text-blue-600">
-              <Loader2 className="animate-spin mb-2" size={32} />
-              <p>A escrever o e-mail...</p>
-            </div>
-          ) : (
-            <>
-              <button onClick={handleCopy} className="absolute top-2 right-2 bg-white border shadow-sm p-2 rounded hover:bg-gray-50 text-gray-600 transition" title="Copiar E-mail">
-                <Copy size={16}/>
-              </button>
-              <textarea 
-                className="w-full h-full min-h-[200px] bg-transparent resize-none outline-none text-gray-700" 
-                defaultValue={emailText} 
-                readOnly
-              />
-            </>
-          )}
-        </div>
-        <div className="flex justify-end mt-4">
-          <Button onClick={onClose}>Concluído</Button>
-        </div>
-      </Card>
-    </div>
-  );
-};
-
 const Payments = ({ bids, onUpdateBid, onDelete, onUpdateData, notify }) => {
   const delivered = bids.filter(b => ['delivered', 'paid'].includes(b.status));
   const total = delivered.filter(b => b.status === 'delivered').reduce((acc, curr) => acc + parseFloat(curr.value || 0), 0);
   const [editingId, setEditingId] = useState(null);
 
-  const [emailModalState, setEmailModalState] = useState({ isOpen: false, bid: null, loading: false, text: '' });
-
-  const handleGenerateEmail = async (bid) => {
-    setEmailModalState({ isOpen: true, bid, loading: true, text: '' });
-    try {
-      const prompt = `Você é um representante comercial da empresa "Alves Martins Licitações". Escreva um e-mail formal, educado e direto para o órgão público responsável "${bid.orgao}".
-      O assunto deve referenciar claramente o Pregão ${bid.numeroPregao}.
-      O corpo do e-mail deve comunicar que os produtos foram devidamente entregues e recebidos pelo órgão, e solicitar cordialmente uma previsão ou confirmação do pagamento do valor total fechado de ${parseFloat(bid.value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}.
-      Deixe os espaços de assinatura vazios [Seu Nome/Departamento] para preenchimento. Não use formatações markdown.`;
-
-      const generatedText = await generateTextWithGemini(prompt);
-      setEmailModalState({ isOpen: true, bid, loading: false, text: generatedText });
-    } catch (error) {
-      setEmailModalState({ isOpen: true, bid, loading: false, text: error.message || 'Erro ao gerar o e-mail pela IA. Verifique a sua chave.' });
-    }
-  };
-
   return (
     <div className="space-y-6">
-      <EmailDraftModal 
-        isOpen={emailModalState.isOpen} 
-        onClose={() => setEmailModalState({ ...emailModalState, isOpen: false })} 
-        bid={emailModalState.bid} 
-        isLoading={emailModalState.loading} 
-        emailText={emailModalState.text} 
-      />
-
       <div className="flex justify-between items-end border-b pb-4">
         <h2 className="text-2xl font-bold text-blue-900 flex items-center gap-2"><DollarSignIcon size={28}/> Pagamentos e Recebíveis</h2>
         <div className="text-right bg-yellow-50 px-6 py-2 rounded-lg border border-yellow-200 shadow-inner">
@@ -920,11 +704,6 @@ const Payments = ({ bids, onUpdateBid, onDelete, onUpdateData, notify }) => {
         return (
           <Card key={bid.id} className={`transition-all relative ${bid.status === 'paid' ? 'opacity-50 bg-gray-50' : 'border-l-4 border-green-500 shadow-md'}`}>
             <div className="absolute top-4 right-4 flex gap-2">
-                 {!bid.status.includes('paid') && (
-                   <Button variant="ai" className="px-2 py-1 text-xs shadow hidden md:flex" onClick={() => handleGenerateEmail(bid)} title="Criar E-mail de Cobrança com IA">
-                     <Sparkles size={14}/> ✨ E-mail IA
-                   </Button>
-                 )}
                  <button onClick={() => setEditingId(bid.id)} className="p-1 text-gray-400 hover:text-blue-600 bg-white rounded shadow-sm"><Edit size={16}/></button>
             </div>
             <div className="flex flex-col md:flex-row justify-between gap-4 mt-6 md:mt-0">
@@ -937,12 +716,6 @@ const Payments = ({ bids, onUpdateBid, onDelete, onUpdateData, notify }) => {
                 <p className="mt-3 font-mono text-xl font-bold text-blue-900">
                   {parseFloat(bid.value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                 </p>
-                
-                {!bid.status.includes('paid') && (
-                   <Button variant="ai" className="mt-3 px-3 py-1 text-xs shadow md:hidden w-full justify-center" onClick={() => handleGenerateEmail(bid)}>
-                     <Sparkles size={14}/> ✨ Escrever E-mail de Cobrança
-                   </Button>
-                )}
               </div>
               <div className="flex items-end gap-4 bg-gray-50 p-4 rounded-lg border border-gray-100 mt-4 md:mt-0">
                 <div className="w-full md:w-48">
@@ -1149,49 +922,6 @@ const Invoices = ({ notify }) => {
   );
 };
 
-// --- MÓDULO DE CONFIGURAÇÕES ---
-const SettingsPage = ({ notify }) => {
-  const [apiKey, setApiKey] = useState('');
-
-  useEffect(() => {
-    // Carrega a chave salva se houver
-    const saved = localStorage.getItem('gemini_api_key');
-    if (saved) setApiKey(saved);
-  }, []);
-
-  const handleSave = () => {
-    if (apiKey.trim()) {
-      localStorage.setItem('gemini_api_key', apiKey.trim());
-      notify("Chave guardada com sucesso no seu navegador!", "success");
-    } else {
-      localStorage.removeItem('gemini_api_key');
-      notify("Chave padrão do sistema restaurada.", "info");
-    }
-  };
-
-  return (
-    <div className="space-y-6 max-w-3xl">
-      <h2 className="text-2xl font-bold text-blue-900 flex items-center gap-2"><Settings size={28}/> Configurações</h2>
-      <Card>
-        <h3 className="text-lg font-bold text-gray-800 mb-4 border-b pb-2">API Gemini (Inteligência Artificial)</h3>
-        <p className="text-sm text-gray-600 mb-4">A chave oficial já está configurada. Só precisa de preencher este campo caso deseje utilizar uma chave de API própria.</p>
-        
-        <Input 
-          label="Chave de API Customizada (Opcional)" 
-          type="password" 
-          value={apiKey} 
-          onChange={e => setApiKey(e.target.value)} 
-          placeholder="Deixe em branco para usar a chave padrão..." 
-        />
-        
-        <Button onClick={handleSave} className="py-2 mt-2">
-          <Save size={18}/> Guardar Preferências
-        </Button>
-      </Card>
-    </div>
-  );
-};
-
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentPage, setCurrentPage] = useState('dashboard');
@@ -1275,8 +1005,6 @@ export default function App() {
           <NavItem id="payments" icon={DollarSign} label="Pagamentos" />
           <NavItem id="certidoes" icon={Shield} label="Certidões e Docs" />
           <NavItem id="invoices" icon={FileText} label="Notas Fiscais" />
-          <div className="my-2 border-t border-blue-800 mx-4"></div>
-          <NavItem id="settings" icon={Settings} label="Configurações" />
         </nav>
         <div className="p-4 border-t border-blue-800"><button onClick={() => setIsAuthenticated(false)} className="flex items-center gap-2 text-blue-200 hover:text-white transition w-full"><LogOut size={18} /> Sair do Sistema</button></div>
       </aside>
@@ -1284,7 +1012,7 @@ export default function App() {
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
         <header className="bg-white shadow-sm p-4 flex justify-between items-center md:hidden z-10"><span className="font-bold text-blue-900">Alves Martins Licitações</span><button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>{isMobileMenuOpen ? <X /> : <Menu />}</button></header>
         {isMobileMenuOpen && (
-          <div className="absolute inset-0 bg-blue-900 z-50 flex flex-col md:hidden"><div className="flex justify-end p-4"><button onClick={() => setIsMobileMenuOpen(false)} className="text-white"><X size={28}/></button></div><nav className="flex-1 overflow-y-auto"><NavItem id="dashboard" icon={LayoutDashboard} label="Dashboard" /><NavItem id="insert" icon={PlusCircle} label="Inserir Pregão" /><NavItem id="tracking" icon={Gavel} label="Acompanhamento" /><NavItem id="won" icon={Trophy} label="Vencidos" /><NavItem id="lost" icon={ThumbsDown} label="Perdidos" /><NavItem id="payments" icon={DollarSign} label="Pagamentos" /><NavItem id="certidoes" icon={Shield} label="Certidões e Docs" /><NavItem id="invoices" icon={FileText} label="Notas Fiscais" /><div className="my-2 border-t border-blue-800 mx-4"></div><NavItem id="settings" icon={Settings} label="Configurações" /></nav></div>
+          <div className="absolute inset-0 bg-blue-900 z-50 flex flex-col md:hidden"><div className="flex justify-end p-4"><button onClick={() => setIsMobileMenuOpen(false)} className="text-white"><X size={28}/></button></div><nav className="flex-1 overflow-y-auto"><NavItem id="dashboard" icon={LayoutDashboard} label="Dashboard" /><NavItem id="insert" icon={PlusCircle} label="Inserir Pregão" /><NavItem id="tracking" icon={Gavel} label="Acompanhamento" /><NavItem id="won" icon={Trophy} label="Vencidos" /><NavItem id="lost" icon={ThumbsDown} label="Perdidos" /><NavItem id="payments" icon={DollarSign} label="Pagamentos" /><NavItem id="certidoes" icon={Shield} label="Certidões e Docs" /><NavItem id="invoices" icon={FileText} label="Notas Fiscais" /></nav></div>
         )}
         <main className="flex-1 overflow-auto p-4 md:p-8">
           {currentPage === 'dashboard' && <Dashboard bids={bids} />}
@@ -1295,7 +1023,6 @@ export default function App() {
           {currentPage === 'payments' && <Payments bids={bids} onUpdateBid={updateBidData} onDelete={handleDeleteBid} onUpdateData={updateBidData} notify={notify} />}
           {currentPage === 'certidoes' && <Certificates notify={notify} />}
           {currentPage === 'invoices' && <Invoices notify={notify} />}
-          {currentPage === 'settings' && <SettingsPage notify={notify} />}
         </main>
       </div>
     </div>
