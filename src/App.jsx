@@ -76,20 +76,37 @@ const parseItems = (itemsData) => {
   return itemsData;
 };
 
-// Leitor de CSV que ignora vírgulas dentro de aspas
-const parseCSVRow = (text) => {
+// Leitor de CSV Avançado (Suporta "R$" e formatação com vírgulas)
+const parseCSVRow = (text, separator = ',') => {
   let result = [];
   let startValueBnd = 0;
   let isQuote = false;
+  
   for (let i = 0; i < text.length; i++) {
     if (text[i] === '"') isQuote = !isQuote;
-    if (text[i] === ',' && !isQuote) {
+    if (text[i] === separator && !isQuote) {
       result.push(text.substring(startValueBnd, i));
       startValueBnd = i + 1;
     }
   }
   result.push(text.substring(startValueBnd));
+  
   return result.map(v => v.replace(/^"|"$/g, '').trim());
+};
+
+const detectSeparator = (lines) => {
+  if (lines.length === 0) return ',';
+  const commaCount = (lines[0].match(/,/g) || []).length;
+  const semicolonCount = (lines[0].match(/;/g) || []).length;
+  return semicolonCount > commaCount ? ';' : ',';
+};
+
+const parseCurrencyToFloat = (valueStr) => {
+  if (!valueStr) return 0;
+  // Remove "R$", espaços, pontos de milhar, e troca vírgula por ponto
+  let cleanedStr = valueStr.replace(/R\$\s?/g, '').replace(/\./g, '').replace(',', '.').trim();
+  let val = parseFloat(cleanedStr);
+  return isNaN(val) ? 0 : val;
 };
 
 // --- TELAS DO SISTEMA ---
@@ -190,18 +207,19 @@ const InsertBid = ({ onAdd, notify }) => {
         const text = event.target.result;
         const lines = text.split(/\r?\n/).filter(line => line.trim());
         const newItems = [];
+        const separator = detectSeparator(lines);
         
         // Pula o cabeçalho (começa do índice 1)
         for (let i = 1; i < lines.length; i++) {
-          const row = parseCSVRow(lines[i]);
+          const row = parseCSVRow(lines[i], separator);
           
           if (row.length >= 2) {
             let desc = row[0];
-            // Trata o número do último campo, substituindo vírgula por ponto (caso venha em formato PT-BR)
-            let valStr = row[row.length - 1].replace(',', '.');
-            let val = parseFloat(valStr);
+            let valStr = row[row.length - 1]; // Assume que o valor é a última coluna na planilha
             
-            if (!isNaN(val)) {
+            let val = parseCurrencyToFloat(valStr);
+            
+            if (val > 0) {
               newItems.push({
                 id: Date.now() + i,
                 description: desc,
@@ -216,9 +234,9 @@ const InsertBid = ({ onAdd, notify }) => {
 
         if (newItems.length > 0) {
           setItems(prevItems => [...prevItems, ...newItems]);
-          notify(`${newItems.length} itens importados com sucesso!`, "success");
+          notify(`${newItems.length} itens importados com sucesso da planilha!`, "success");
         } else {
-          notify("Nenhum item com valor numérico encontrado na planilha.", "error");
+          notify("Nenhum item com valor válido encontrado. Verifique se o formato da planilha tem 2 colunas: Descrição e Valor.", "error");
         }
       } catch (error) {
         console.error(error);
@@ -275,8 +293,8 @@ const InsertBid = ({ onAdd, notify }) => {
       <Card className="bg-gradient-to-r from-blue-800 to-blue-700 text-white border-0">
         <div className="flex flex-col md:flex-row justify-between items-center gap-4">
           <div>
-            <h2 className="text-2xl font-bold flex items-center gap-2"><FileSpreadsheet className="text-blue-200"/> Importação Rápida</h2>
-            <p className="text-blue-100 text-sm mt-1">Carregue um arquivo .CSV com duas colunas (Item e Valor) para preencher a lista automaticamente.</p>
+            <h2 className="text-2xl font-bold flex items-center gap-2"><FileSpreadsheet className="text-blue-200"/> Importação Rápida de Planilha</h2>
+            <p className="text-blue-100 text-sm mt-1">Carregue um arquivo .CSV com duas colunas (Descrição do Item e Valor) para preencher a lista automaticamente.</p>
           </div>
           <input type="file" ref={fileInputRef} onChange={handleCsvUpload} className="hidden" accept=".csv" />
           <Button variant="secondary" onClick={() => fileInputRef.current.click()} disabled={csvLoading} className="whitespace-nowrap shadow-lg text-blue-900">
@@ -738,7 +756,6 @@ const Payments = ({ bids, onUpdateBid, onDelete, onUpdateData, notify }) => {
   );
 };
 
-// --- MÓDULO DE CERTIDÕES ---
 const Certificates = ({ notify }) => {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
